@@ -1,0 +1,93 @@
+@import "./tokens.css";
+@import "./themes.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-base);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 环境光：由炉温驱动，是炉体唯一的整体光感来源 */
+#root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(
+      1100px 720px at 18% 8%,
+      color-mix(in srgb, var(--ember) 16%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      900px 620px at 86% 92%,
+      color-mix(in srgb, var(--layer-qi) 10%, transparent),
+      transparent 60%
+    );
+  opacity: calc(var(--furnace-glow, 0.35) * var(--ambient));
+  transition: opacity var(--dur-slow) var(--ease-liquid);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--ember-bright);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--ember) 42%, transparent);
+}
+
+/* 元数据与编号 */
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 大师原声与思考正文 */
+.prose {
+  font-family: var(--font-prose);
+  font-size: var(--fs-lead);
+  line-height: var(--lh-prose);
+  letter-spacing: 0.01em;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

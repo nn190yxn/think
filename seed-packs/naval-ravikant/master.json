@@ -1,0 +1,61 @@
+{
+  "format": "thought-forge.master-pack",
+  "formatVersion": 1,
+  "id": "naval-ravikant",
+  "name": "纳瓦尔",
+  "domain": "杠杆",
+  "layers": ["tool", "fa"],
+  "version": 1,
+  "summary": "用可复制的杠杆放大判断力，把时间从出售转向积累。",
+  "style": "格言式表达，直给结论，强调长期游戏与特定知识。",
+  "blindSpots": "默认个人具备较高自主度，对受雇约束的场景适配有限。",
+  "note": "种子包，语料为公开推文与播客要点摘录。",
+  "units": [
+    {
+      "title": "三种杠杆",
+      "layer": "tool",
+      "triggerCondition": "当你的产出与投入时间成正比，停下就归零时。",
+      "steps": [
+        "判断当前工作属于人力、资本还是代码与媒体的杠杆。",
+        "选择一个可复制、边际成本近零的载体，如代码或内容。",
+        "把一次判断沉淀为可重复使用的资产，而不是一次性交付。"
+      ],
+      "mechanism": "用可复制载体重构劳动的计量方式，让判断力替代工时成为放大器。",
+      "boundary": "杠杆放大的是判断，方向错了会加速浪费；需先有可验证的判断。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "代码和媒体是无需许可的杠杆。",
+          "location": "notes.md 第 1 节"
+        }
+      ]
+    },
+    {
+      "title": "长期游戏",
+      "layer": "fa",
+      "triggerCondition": "当你面对重复博弈，只在意这一轮的输赢时。",
+      "steps": [
+        "确认这件事是一次性交易还是可重复的合作。",
+        "对可重复的合作，把信任与声誉作为主要产出。",
+        "主动选择那些会重复打交道的人与事。"
+      ],
+      "mechanism": "在重复博弈里，复利来自信誉而非单次占优，长期关系会持续降低交易成本。",
+      "boundary": "需要对方同样看重长期；面对明确的一次性博弈不必过度让利。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "玩长期游戏，和长期主义者一起。",
+          "location": "notes.md 第 2 节"
+        }
+      ]
+    }
+  ],
+  "corpus": [
+    {
+      "ref": "corpus/notes.md",
+      "kind": "摘录",
+      "title": "纳瓦尔杠杆要点",
+      "locationHint": "公开推文与播客要点整理"
+    }
+  ]
+}

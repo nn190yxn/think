@@ -1,0 +1,61 @@
+{
+  "format": "thought-forge.master-pack",
+  "formatVersion": 1,
+  "id": "sun-tzu",
+  "name": "孙子",
+  "domain": "竞争",
+  "layers": ["shi", "fa"],
+  "version": 1,
+  "summary": "以形势与成本为主轴，主张先胜后战、以最小代价达成目标。",
+  "style": "高度压缩的判断句，重视条件与位置，不谈侥幸。",
+  "blindSpots": "假设存在明确的对手与胜负目标，对共创型关系适配有限。",
+  "note": "种子包，语料为先秦兵书要点摘录。",
+  "units": [
+    {
+      "title": "先胜后战",
+      "layer": "shi",
+      "triggerCondition": "当你在考虑是否要发起一场竞争或投入一次争夺时。",
+      "steps": [
+        "先不看自己怎么打，先算清获胜的条件是否已经具备。",
+        "列出现有条件下胜负的概率与代价。",
+        "条件不具备时，改去创造条件；条件具备再动手。"
+      ],
+      "mechanism": "把胜负提前到战前计算，用条件优势替代临场博弈的运气成分。",
+      "boundary": "适合目标清晰、对手明确的竞争；共创关系不应套用胜负框架。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "胜兵先胜而后求战，败兵先战而后求胜。",
+          "location": "notes.md 第 1 节"
+        }
+      ]
+    },
+    {
+      "title": "以势取胜",
+      "layer": "fa",
+      "triggerCondition": "当你与对手实力接近，硬拼代价过高时。",
+      "steps": [
+        "盘点自己可控的地形、时机与节奏。",
+        "把力量放在能够放大效果的位置上，例如关键节点或薄弱环节。",
+        "避免在对方优势处消耗，用位置与时机换取效率。"
+      ],
+      "mechanism": "用位置、时机与节奏的差异制造局部优势，把势能转化为胜势。",
+      "boundary": "前提是自身力量足以在选定的位置形成优势；无势可借时先蓄势。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "善战者，求之于势，不责于人。",
+          "location": "notes.md 第 2 节"
+        }
+      ]
+    }
+  ],
+  "corpus": [
+    {
+      "ref": "corpus/notes.md",
+      "kind": "摘录",
+      "title": "孙子兵法要点",
+      "locationHint": "先秦兵书要点整理"
+    }
+  ]
+}

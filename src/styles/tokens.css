@@ -1,0 +1,129 @@
+/*
+ * 设计令牌：与主题无关的部分。
+ * 颜色令牌全部放在 themes.css，两套主题共用同一组名称。
+ */
+
+:root {
+  /* 间距阶梯 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
+
+  /* 圆角：器形偏方，只在大面板上给足圆角 */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* 描边 */
+  --line-w: 1px;
+
+  /* 字号阶梯 */
+  --fs-mono: 12px;
+  --fs-meta: 13px;
+  --fs-body: 14px;
+  --fs-lead: 16px;
+  --fs-title: 20px;
+  --fs-head: 26px;
+  --fs-display: 34px;
+  --fs-hero: 46px;
+
+  /* 行高 */
+  --lh-tight: 1.3;
+  --lh-base: 1.6;
+  /* 大师原声与思考正文：行高放大，读起来像文献 */
+  --lh-prose: 1.8;
+
+  /* 字体 */
+  --font-ui: "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC",
+    "Microsoft YaHei", system-ui, sans-serif;
+  --font-prose: "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC",
+    "SimSun", Georgia, serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+
+  /* 动效 */
+  --dur-fast: 120ms;
+  --dur-base: 240ms;
+  --dur-slow: 480ms;
+  --dur-ambient: 1200ms;
+  --ease-liquid: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-ember: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  /* 布局常量 */
+  --spine-w: 72px;
+  --spine-w-open: 240px;
+  --rail-w: 96px;
+
+  /* 毛玻璃 */
+  --glass-blur: 16px;
+}
+
+/*
+ * 六层层次色与几何标记。
+ * 几何标记用 mask 图形实现，供高对比模式与色觉障碍用户区分层次。
+ */
+[data-layer="dao"] {
+  --layer: var(--layer-dao);
+}
+[data-layer="fa"] {
+  --layer: var(--layer-fa);
+}
+[data-layer="shu"] {
+  --layer: var(--layer-shu);
+}
+[data-layer="qi"] {
+  --layer: var(--layer-qi);
+}
+[data-layer="tool"] {
+  --layer: var(--layer-tool);
+}
+[data-layer="shi"] {
+  --layer: var(--layer-shi);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+    --dur-ambient: 1ms;
+  }
+}
+
+/* 显式开启的降动效：连环境呼吸与粒子一起停掉，只保留状态色变与位置变化。 */
+[data-motion="reduced"] {
+  --dur-fast: 1ms;
+  --dur-base: 1ms;
+  --dur-slow: 1ms;
+  --dur-ambient: 1ms;
+}
+
+/*
+ * 高对比：加深文字与描边、关掉发光，层次由几何标记承担。
+ * 两套主题各自给出在自身底色上仍然清晰的一组值。
+ */
+[data-contrast="high"] {
+  --line-w: 2px;
+  --glow: 0;
+}
+
+[data-contrast="high"][data-theme="kiln"] {
+  --text-1: #ffffff;
+  --text-2: #f2e9dc;
+  --text-3: #d4c8b6;
+  --line: #6d5940;
+  --line-strong: #967753;
+}
+
+[data-contrast="high"][data-theme="suci"] {
+  --text-1: #000000;
+  --text-2: #241d16;
+  --text-3: #453a2d;
+  --line: #9a876c;
+  --line-strong: #6f5c42;
+}

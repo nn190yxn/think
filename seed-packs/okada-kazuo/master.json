@@ -1,0 +1,61 @@
+{
+  "format": "thought-forge.master-pack",
+  "formatVersion": 1,
+  "id": "okada-kazuo",
+  "name": "稻盛和夫",
+  "domain": "经营",
+  "layers": ["dao", "qi"],
+  "version": 1,
+  "summary": "以心性为根、以数字为镜的经营之道，把组织还原为人的动机与意志。",
+  "style": "平实追问，先问动机再谈方法，常用朴素比喻把问题拉回原点。",
+  "blindSpots": "对高速变化的技术型市场与平台型竞争着墨较少。",
+  "note": "种子包，语料为公开演讲与访谈的要点摘录，非原文复制。",
+  "units": [
+    {
+      "title": "心性优先",
+      "layer": "dao",
+      "triggerCondition": "当你要判断一件事值不值得长期投入，而非计算这一季的收益时。",
+      "steps": [
+        "写下这件事想达成的结果，并追问它让谁变好、变好成什么样。",
+        "把动机拆成「为他人」与「为自己」两栏，看哪一栏在支撑这件事。",
+        "如果动机栏失衡，先修正动机再决定是否投入。"
+      ],
+      "mechanism": "把价值判断前置到行动之前，用动机的纯度筛选长期可承受的方向。",
+      "boundary": "适用于需要多年持续的判断；短期战术选择不必上纲到这个层次。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "作为人，何谓正确。",
+          "location": "notes.md 第 1 节"
+        }
+      ]
+    },
+    {
+      "title": "六项精进",
+      "layer": "qi",
+      "triggerCondition": "当你感到努力没有回报、状态松散、动力衰减时。",
+      "steps": [
+        "确认自己是否付出了不亚于任何人的努力。",
+        "检视是否因得意而停止反省，写下近期一次傲慢的迹象。",
+        "回到感谢与利他的动作上，先做一件对他人有用的小事。"
+      ],
+      "mechanism": "用一组固定动作维持心力水位，让持续的投入不依赖情绪波动。",
+      "boundary": "偏向个人修行与自我约束，不能替代组织机制与制度设计。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "付出不亚于任何人的努力；要每天反省。",
+          "location": "notes.md 第 2 节"
+        }
+      ]
+    }
+  ],
+  "corpus": [
+    {
+      "ref": "corpus/notes.md",
+      "kind": "摘录",
+      "title": "稻盛和夫经营要点",
+      "locationHint": "公开演讲要点整理"
+    }
+  ]
+}

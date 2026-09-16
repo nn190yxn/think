@@ -1,0 +1,61 @@
+{
+  "format": "thought-forge.master-pack",
+  "formatVersion": 1,
+  "id": "steve-jobs",
+  "name": "史蒂夫·乔布斯",
+  "domain": "产品",
+  "layers": ["shu", "dao"],
+  "version": 1,
+  "summary": "以聚焦和端到端体验为手段，把复杂产品收敛到一个清晰的主张上。",
+  "style": "决断、浓缩、偏执于体验细节，常用三句话讲完一个产品。",
+  "blindSpots": "对协作型组织与渐进式改良的评价偏低。",
+  "note": "种子包，语料为公开访谈要点摘录。",
+  "units": [
+    {
+      "title": "聚焦即说不",
+      "layer": "shu",
+      "triggerCondition": "当你的待办清单越来越长，每个都想做时。",
+      "steps": [
+        "列出当前所有在做的方向。",
+        "只保留能定义你的那一件，其余全部标为不做。",
+        "把不做的决定写下来并对外说明理由。"
+      ],
+      "mechanism": "用主动放弃换取注意力密度，让有限资源集中在一处形成穿透。",
+      "boundary": "适用于资源有限的独立产品决策；守成型业务的收缩需权衡存量客户。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "决定不做什么，和决定做什么同样重要。",
+          "location": "notes.md 第 1 节"
+        }
+      ]
+    },
+    {
+      "title": "端到端体验",
+      "layer": "dao",
+      "triggerCondition": "当产品体验在多个环节之间反复折损时。",
+      "steps": [
+        "把用户从第一次接触到长期使用画成一条线。",
+        "逐段标出体验断裂或需要用户自行脑补的位置。",
+        "对断裂处，收回关键环节的控制权或重做那一段。"
+      ],
+      "mechanism": "把整体体验当作唯一交付物，用端到端控制减少环节间的损耗。",
+      "boundary": "要求团队具备跨环节能力；开放生态下的松耦合产品难以照搬。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "我们对用户体验的全过程负责。",
+          "location": "notes.md 第 2 节"
+        }
+      ]
+    }
+  ],
+  "corpus": [
+    {
+      "ref": "corpus/notes.md",
+      "kind": "摘录",
+      "title": "乔布斯产品要点",
+      "locationHint": "公开发言要点整理"
+    }
+  ]
+}

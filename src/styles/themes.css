@@ -1,0 +1,69 @@
+/*
+ * 两套主题共用一组令牌名，切换不改变任何布局与尺寸。
+ * 窑变：暗色，默认。素瓷：明色。
+ */
+
+[data-theme="kiln"] {
+  color-scheme: dark;
+
+  --bg-0: #0e0c0b;
+  --bg-1: #17130f;
+  --bg-2: #211b16;
+
+  --text-1: #fcf7f0;
+  --text-2: #d6cbbc;
+  --text-3: #a2947f;
+
+  --ember: #e2703a;
+  --ember-bright: #ff9a5a;
+  --ash: #7a7066;
+
+  --line: #33291f;
+  --line-strong: #4a3b2c;
+  --overlay: rgba(14, 12, 11, 0.72);
+
+  --layer-dao: #7c8cf8;
+  --layer-fa: #3fbf9f;
+  --layer-shu: #e8a33d;
+  --layer-qi: #e4564a;
+  --layer-tool: #a98be0;
+  --layer-shi: #46c2d6;
+
+  /* 暗色靠发光表达激活 */
+  --glow: 1;
+  --ambient: 1;
+  --shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme="suci"] {
+  color-scheme: light;
+
+  --bg-0: #f3ede3;
+  --bg-1: #fbf8f3;
+  --bg-2: #ffffff;
+
+  --text-1: #221c16;
+  --text-2: #574e44;
+  --text-3: #857a6c;
+
+  --ember: #b84e22;
+  --ember-bright: #d4661f;
+  --ash: #a79c8e;
+
+  --line: #e2d8c8;
+  --line-strong: #cbbda8;
+  --overlay: rgba(243, 237, 227, 0.78);
+
+  /* 明色下加深层次色，用于描边与文字 */
+  --layer-dao: #4b5bd6;
+  --layer-fa: #158f73;
+  --layer-shu: #b4761a;
+  --layer-qi: #c63225;
+  --layer-tool: #7b4fd1;
+  --layer-shi: #0e7c8f;
+
+  /* 明色不用发光，改用暗色阴影；环境光降为暗色的四成 */
+  --glow: 0;
+  --ambient: 0.4;
+  --shadow-panel: 0 14px 36px rgba(60, 46, 30, 0.16);
+}

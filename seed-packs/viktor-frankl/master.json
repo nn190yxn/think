@@ -1,0 +1,61 @@
+{
+  "format": "thought-forge.master-pack",
+  "formatVersion": 1,
+  "id": "viktor-frankl",
+  "name": "维克多·弗兰克尔",
+  "domain": "意义",
+  "layers": ["qi", "dao"],
+  "version": 1,
+  "summary": "在不可改变的处境里，通过重新定义意义来保留人的选择自由。",
+  "style": "沉静克制，先承认痛苦的真实，再谈如何承载。",
+  "blindSpots": "对需要改变外部条件的现实问题，可能低估行动的必要。",
+  "note": "种子包，语料为公开著作要点摘录。",
+  "units": [
+    {
+      "title": "最后一种自由",
+      "layer": "qi",
+      "triggerCondition": "当你面对无法改变的处境，感到完全被环境决定时。",
+      "steps": [
+        "区分哪些条件可以改变，哪些确实无法改变。",
+        "对无法改变的部分，明确自己选择以什么姿态面对。",
+        "把他人的期待或自己的信念作为这份姿态的支点。"
+      ],
+      "mechanism": "把关注点从改变处境转向选择态度，保住行动的主体感与心力。",
+      "boundary": "用于承载而非美化苦难；可改变的处境应先着手改变。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "人所拥有的任何东西都可以被剥夺，唯独选择态度的自由除外。",
+          "location": "notes.md 第 1 节"
+        }
+      ]
+    },
+    {
+      "title": "意义的三种来源",
+      "layer": "dao",
+      "triggerCondition": "当你觉得手头的事没有意义，只感到消耗时。",
+      "steps": [
+        "检视当前是否缺了创造、体验或态度中的哪一类。",
+        "补上缺失的那一类，例如做一件作品、认真体验一段关系。",
+        "把补上的动作固定为可重复的习惯。"
+      ],
+      "mechanism": "从创造、体验、态度三个通道重建意义供给，让动机不依赖结果反馈。",
+      "boundary": "是意义的框架而非鸡汤，需要落到具体行动，空谈不会产生意义。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "意义来自创造、体验，以及我们对命运所采取的态度。",
+          "location": "notes.md 第 2 节"
+        }
+      ]
+    }
+  ],
+  "corpus": [
+    {
+      "ref": "corpus/notes.md",
+      "kind": "摘录",
+      "title": "弗兰克尔意义要点",
+      "locationHint": "公开著作要点整理"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+[package]
+name = "thought-forge-desktop"
+version = "0.1.0"
+edition = "2021"
+# 依赖树含 edition 2024 的 crate（keyring、getrandom、time 等），需要 1.85+ 的 Cargo。
+rust-version = "1.85"
+description = "自我提升的思想熔炉 · 桌面外壳"
+publish = false
+
+[workspace]
+members = ["crates/core"]
+# 纯逻辑 crate 可以脱离 WebView 系统库单测；单测时请显式指定 `-p thought-forge-core`。
+resolver = "2"
+
+[lib]
+name = "thought_forge_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+thought-forge-core = { path = "crates/core" }
+tauri = { version = "2", features = [] }
+# 自动更新：签名产物由 CI 生成，检查与安装走 updater 插件，遵循联网开关默认关闭。
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 只用于纯逻辑层的传输实现；请求组装与响应解析仍在 crates/core。
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+# 外壳持有连接并向下传引用，需要与内核一致的 SQLite 版本与打包特性。
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+# 系统凭据库：数据库只存引用名，密钥本体交操作系统保管。
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }

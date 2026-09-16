@@ -1,0 +1,19 @@
+[package]
+name = "thought-forge-core"
+version = "0.1.0"
+edition = "2021"
+# 代码使用 Option::is_none_or（1.82 稳定）等较新 API，与外壳保持同一 MSRV。
+rust-version = "1.85"
+description = "思想熔炉的纯逻辑内核：数据库连接、迁移、设置与统计"
+publish = false
+
+[dependencies]
+# bundled 让 SQLite 随 crate 编译，用户机器无需预装 sqlite。
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"

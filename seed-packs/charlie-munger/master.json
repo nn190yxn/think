@@ -1,0 +1,61 @@
+{
+  "format": "thought-forge.master-pack",
+  "formatVersion": 1,
+  "id": "charlie-munger",
+  "name": "查理·芒格",
+  "domain": "投资",
+  "layers": ["fa", "tool"],
+  "version": 1,
+  "summary": "用多元思维模型与逆向排除法，把判断变成可复用的检查清单。",
+  "style": "冷静直接，先排除错误答案，再谈正确答案，偏好清单与常识。",
+  "blindSpots": "对需要快速试错的早期创新场景，等待成本可能过高。",
+  "note": "种子包，语料为公开演讲要点摘录。",
+  "units": [
+    {
+      "title": "逆向排除",
+      "layer": "fa",
+      "triggerCondition": "当你在为一个决定寻找理由，越找越有信心时。",
+      "steps": [
+        "把问题倒过来：什么会让这件事彻底失败。",
+        "列出三条最可能致命的失败路径。",
+        "先设计规避这三条路径的动作，再谈怎么成功。"
+      ],
+      "mechanism": "反向提问绕开确认偏误，先压缩下行风险再释放上行空间。",
+      "boundary": "适合不可逆、代价高的决定；可快速重来小实验不值得这样用。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "反过来想，总是反过来想。",
+          "location": "notes.md 第 1 节"
+        }
+      ]
+    },
+    {
+      "title": "多元思维模型",
+      "layer": "tool",
+      "triggerCondition": "当你的分析只从一个学科、一个角度看问题时。",
+      "steps": [
+        "列出你正在使用的模型，通常只有一两个。",
+        "补上至少两个其他学科的模型，如心理学、生物学、工程学。",
+        "看这几个模型是否指向同一个结论，分歧处就是风险所在。"
+      ],
+      "mechanism": "用多模型交叉验证替代单模型自信，让误判在交叉处暴露。",
+      "boundary": "模型是工具而非答案，堆砌模型而不收敛结论会变成空转。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "手里只有锤子的人，看什么都像钉子。",
+          "location": "notes.md 第 2 节"
+        }
+      ]
+    }
+  ],
+  "corpus": [
+    {
+      "ref": "corpus/notes.md",
+      "kind": "摘录",
+      "title": "芒格思维要点",
+      "locationHint": "公开演讲要点整理"
+    }
+  ]
+}
