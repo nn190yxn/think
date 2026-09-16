@@ -173,6 +173,7 @@ let demoDiscovery: DiscoverySettings = { ...DEMO_DISCOVERY };
 let demoCapture: CaptureSettingsView = {
   ...DEMO_CAPTURE_SETTINGS,
   capabilities: DEMO_CAPTURE_SETTINGS.capabilities.map((item) => ({ ...item })),
+  watchRoots: [...DEMO_CAPTURE_SETTINGS.watchRoots],
 };
 let demoCaptureEvents: CaptureEventView[] = [...DEMO_CAPTURE_EVENTS];
 let demoKbSources: KbSourceView[] = DEMO_KB_SOURCES.map((source) => ({ ...source }));
@@ -1218,6 +1219,27 @@ export const stubTransport: CommandTransport = {
           dedupSeconds: Number(payload.seconds ?? demoCapture.dedupSeconds),
         };
         return { ok: true, data: demoCapture };
+      case "capture_set_watch_roots": {
+        // 与外壳一致：目录为空时文件活动标记为系统不可用。
+        const paths = Array.isArray(payload.paths)
+          ? payload.paths.map((item) => String(item))
+          : [];
+        demoCapture = {
+          ...demoCapture,
+          watchRoots: paths,
+          capabilities: demoCapture.capabilities.map((item) =>
+            item.kind === "file"
+              ? {
+                  ...item,
+                  available: paths.length > 0,
+                  enabled: paths.length > 0 ? item.enabled : false,
+                  consentedAt: paths.length > 0 ? item.consentedAt : null,
+                }
+              : item,
+          ),
+        };
+        return { ok: true, data: demoCapture };
+      }
       case "capture_collect": {
         if (demoCapture.paused) {
           return {

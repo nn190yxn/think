@@ -121,6 +121,7 @@ pub fn run() {
             commands::capture_set_paused,
             commands::capture_set_redaction,
             commands::capture_set_dedup,
+            commands::capture_set_watch_roots,
             commands::capture_collect,
             commands::capture_events,
             commands::capture_summaries,

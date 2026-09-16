@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use rusqlite::Connection;
 
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 use crate::util::{sha256_hex, unique_id};
 
 use super::redact::redact_value;
@@ -15,7 +15,7 @@ use super::repo;
 use super::{
     parse_epoch, CaptureCapabilityView, CaptureFilter, CaptureKind, CaptureOutcome,
     CaptureSettingsView, CaptureSource, RawSample, CAPTURE_KINDS, FILE_QUEUE_CAPACITY,
-    FILE_TRAILING_WINDOW_SECONDS, WINDOW_MERGE_GAP_SECONDS,
+    FILE_TRAILING_WINDOW_SECONDS, KIND_FILE, MAX_WATCH_ROOTS, WINDOW_MERGE_GAP_SECONDS,
 };
 
 /// 采集能力视图。`unavailable` 里的能力由外壳标记为系统不可用。
@@ -41,7 +41,81 @@ pub fn settings_view(conn: &Connection, unavailable: &[&str]) -> CoreResult<Capt
         redaction_enabled: rules.enabled,
         redaction_terms: rules.terms.len() as i64,
         capabilities,
+        watch_roots: repo::watch_roots(conn)?,
     })
+}
+
+/// 逐条校验并归一化受关注目录，返回接受的路径与第一条错误说明。
+///
+/// 只接受已存在的绝对路径：相对路径的含义随进程工作目录变化，静默放行会让用户
+/// 以为监听生效了而实际盯着别处。嵌套在已接受目录内的路径会被丢弃，否则 notify
+/// 会对同一个文件重复上报。
+fn vet_watch_roots(paths: &[String]) -> (Vec<String>, Option<String>) {
+    let mut accepted: Vec<std::path::PathBuf> = Vec::new();
+    let mut failure = None;
+    for raw in paths {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let path = std::path::PathBuf::from(trimmed);
+        if !path.is_absolute() {
+            failure.get_or_insert_with(|| format!("关注目录需要绝对路径：{trimmed}"));
+            continue;
+        }
+        if !path.is_dir() {
+            failure.get_or_insert_with(|| format!("目录不存在或不可读：{trimmed}"));
+            continue;
+        }
+        if accepted.iter().any(|existing| path.starts_with(existing)) {
+            continue;
+        }
+        accepted.retain(|existing| !existing.starts_with(&path));
+        accepted.push(path);
+    }
+    if accepted.len() > MAX_WATCH_ROOTS {
+        failure.get_or_insert_with(|| format!("关注目录最多 {MAX_WATCH_ROOTS} 个"));
+        accepted.truncate(MAX_WATCH_ROOTS);
+    }
+    let accepted = accepted
+        .into_iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    (accepted, failure)
+}
+
+/// 界面提交用的严格校验：任何一条不合格都拒绝整次提交，让用户看到原因。
+pub fn normalize_watch_roots(paths: &[String]) -> CoreResult<Vec<String>> {
+    let (accepted, failure) = vet_watch_roots(paths);
+    match failure {
+        Some(message) => Err(CoreError::InvalidInput(message)),
+        None => Ok(accepted),
+    }
+}
+
+/// 启动时读取设置用的宽松校验：丢弃坏项，保留其余可用目录。
+pub fn accepted_watch_roots(paths: &[String]) -> Vec<String> {
+    vet_watch_roots(paths).0
+}
+
+/// 保存受关注目录并写审计。外壳在这之后按返回值重建文件监听。
+pub fn set_watch_roots(
+    conn: &Connection,
+    paths: &[String],
+    unavailable: &[&str],
+) -> CoreResult<CaptureSettingsView> {
+    let roots = normalize_watch_roots(paths)?;
+    repo::set_watch_roots(conn, &roots)?;
+    if !roots.is_empty() {
+        repo::insert_audit(
+            conn,
+            &unique_id("cap-audit", &format!("watch-roots{}", roots.len())),
+            KIND_FILE,
+            "watch_roots",
+            &format!("监听 {} 个目录", roots.len()),
+        )?;
+    }
+    settings_view(conn, unavailable)
 }
 
 /// 切换单项能力并写审计。

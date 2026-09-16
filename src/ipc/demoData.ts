@@ -2146,6 +2146,8 @@ export const DEMO_CAPTURE_SETTINGS: CaptureSettingsView = {
       consentedAt: null,
     },
   ],
+  // 尚未设置关注目录，因此文件活动不可用；在采集台添加目录后即可开启。
+  watchRoots: [],
 };
 
 export const DEMO_CAPTURE_EVENTS: readonly CaptureEventView[] = [

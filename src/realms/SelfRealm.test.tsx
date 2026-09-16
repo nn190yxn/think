@@ -142,6 +142,36 @@ describe("我境界 · 成长轨迹", () => {
     );
   });
 
+  it("添加关注目录后文件活动可开启，移除后重新不可用", async () => {
+    renderRealm();
+    expect(await screen.findByText("采集台")).toBeInTheDocument();
+
+    // 未设置关注目录时，文件活动没有可用来源。
+    expect(screen.getByText("还没有关注目录，文件活动因此不可用。")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "文件活动" })).toBeDisabled();
+
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "新增关注目录" }),
+      "/tmp/notes",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "添加" }));
+
+    const roots = await screen.findByRole("list", { name: "关注目录" });
+    expect(within(roots).getByText("/tmp/notes")).toBeInTheDocument();
+    expect(screen.getByText("已监听 1 个目录")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "文件活动" })).toBeEnabled(),
+    );
+
+    await userEvent.click(
+      within(roots).getByRole("button", { name: "移除关注目录 /tmp/notes" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "文件活动" })).toBeDisabled(),
+    );
+    expect(screen.getByText("已清空关注目录")).toBeInTheDocument();
+  });
+
   it("铜镜展示解锁进度，逐条确认后可安装为会诊席位", async () => {
     renderRealm();
     expect(await screen.findByText("铜镜 · 自我蒸馏")).toBeInTheDocument();

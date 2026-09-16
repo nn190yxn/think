@@ -8,7 +8,7 @@ use crate::error::CoreResult;
 use super::redact::RedactionRules;
 use super::{
     CaptureAuditView, CaptureEventView, CaptureFilter, CaptureSummaryView, DEFAULT_DEDUP_SECONDS,
-    MAX_EXCERPT_CHARS, PAUSE_SETTING_KEY, REDACTION_SETTING_KEY,
+    MAX_EXCERPT_CHARS, PAUSE_SETTING_KEY, REDACTION_SETTING_KEY, WATCH_ROOTS_SETTING_KEY,
 };
 
 const DEDUP_SETTING_KEY: &str = "capture.dedup_seconds";
@@ -100,6 +100,22 @@ pub fn set_redaction_rules(conn: &Connection, rules: &RedactionRules) -> CoreRes
         conn,
         REDACTION_SETTING_KEY,
         &serde_json::to_string(rules).unwrap_or_default(),
+    )
+}
+
+/// 受关注目录。值损坏时按空列表处理，由界面提示重新设置。
+pub fn watch_roots(conn: &Connection) -> CoreResult<Vec<String>> {
+    let Some(raw) = settings::get(conn, WATCH_ROOTS_SETTING_KEY)? else {
+        return Ok(Vec::new());
+    };
+    Ok(serde_json::from_str(&raw).unwrap_or_default())
+}
+
+pub fn set_watch_roots(conn: &Connection, roots: &[String]) -> CoreResult<()> {
+    settings::set(
+        conn,
+        WATCH_ROOTS_SETTING_KEY,
+        &serde_json::to_string(roots).unwrap_or_else(|_| "[]".to_string()),
     )
 }
 

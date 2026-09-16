@@ -16,8 +16,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 use thought_forge_core::capture::{
+    pipeline as capture_pipeline,
     CaptureKind, CaptureSource, RawSample, FILE_QUEUE_CAPACITY, KIND_CLIPBOARD_IMAGE,
-    KIND_CLIPBOARD_TEXT, KIND_FILE, KIND_WINDOW,
+    KIND_CLIPBOARD_TEXT, KIND_FILE, KIND_WINDOW, WATCH_ROOTS_SETTING_KEY,
 };
 use thought_forge_core::{CoreError, CoreResult};
 
@@ -25,8 +26,8 @@ use thought_forge_core::{CoreError, CoreResult};
 pub const CLIPBOARD_INTERVAL_MS: u64 = 800;
 /// 前台窗口最小采样间隔，与设计一致。
 pub const WINDOW_INTERVAL_MS: u64 = 2000;
-/// 关注目录列表的设置键，值为 JSON 字符串数组。
-pub const WATCH_ROOTS_KEY: &str = "capture.watch_roots";
+/// 关注目录列表的设置键，与内核共用同一个契约。
+pub const WATCH_ROOTS_KEY: &str = WATCH_ROOTS_SETTING_KEY;
 
 #[cfg(windows)]
 use crate::capture_win as platform;
@@ -100,6 +101,7 @@ type FileEntry = (String, String, i64);
 /// 常驻文件活动监听。关注目录为空时不建立监听。
 struct FileWatch {
     _watcher: Option<RecommendedWatcher>,
+    roots: Vec<PathBuf>,
     queue: std::sync::Arc<Mutex<VecDeque<FileEntry>>>,
 }
 
@@ -109,6 +111,7 @@ impl FileWatch {
         if roots.is_empty() {
             return Ok(Self {
                 _watcher: None,
+                roots: Vec::new(),
                 queue,
             });
         }
@@ -146,6 +149,7 @@ impl FileWatch {
         }
         Ok(Self {
             _watcher: Some(watcher),
+            roots: roots.to_vec(),
             queue,
         })
     }
@@ -182,18 +186,28 @@ impl Cadence {
 
 /// 外壳采集源。常驻在应用状态里，文件监听因此可以跨多次采集持续积累事件。
 pub struct ShellCapture {
-    roots: Vec<PathBuf>,
-    files: FileWatch,
+    /// 文件监听可被替换，因此连同一份可变状态放进互斥量；`poll` 只在这里做短暂加锁。
+    files: Mutex<FileWatch>,
     cadence: Mutex<Cadence>,
 }
 
 impl ShellCapture {
     pub fn new(roots: Vec<PathBuf>) -> CoreResult<Self> {
         Ok(Self {
-            files: FileWatch::new(&roots)?,
-            roots,
+            files: Mutex::new(FileWatch::new(&roots)?),
             cadence: Mutex::new(Cadence::default()),
         })
+    }
+
+    /// 替换受关注目录。先建成新监听再换入，失败时保持原有监听继续工作。
+    pub fn set_watch_roots(&self, roots: Vec<PathBuf>) -> CoreResult<()> {
+        // 建监听会做文件系统调用，放在锁外完成，避免阻塞正在进行的采集。
+        let rebuilt = FileWatch::new(&roots)?;
+        let Ok(mut files) = self.files.lock() else {
+            return Err(CoreError::InvalidInput("文件监听锁不可用".to_string()));
+        };
+        *files = rebuilt;
+        Ok(())
     }
 
     /// 未在本机或当前配置下提供的能力。界面据此禁用对应开关。
@@ -205,7 +219,11 @@ impl ShellCapture {
             unavailable.push(KIND_CLIPBOARD_IMAGE);
             unavailable.push(KIND_WINDOW);
         }
-        if self.roots.is_empty() {
+        let no_roots = match self.files.lock() {
+            Ok(files) => files.roots.is_empty(),
+            Err(_) => true,
+        };
+        if no_roots {
             unavailable.push(KIND_FILE);
         }
         unavailable
@@ -217,10 +235,10 @@ impl ShellCapture {
             return Vec::new();
         };
         let parsed: Vec<String> = serde_json::from_str(value).unwrap_or_default();
-        parsed
+        // 启动时容忍坏项：丢弃不合格的目录，而不是让整个应用起不来。
+        capture_pipeline::accepted_watch_roots(&parsed)
             .into_iter()
-            .map(|item| PathBuf::from(item.trim()))
-            .filter(|path| !path.as_os_str().is_empty() && path.is_dir())
+            .map(PathBuf::from)
             .collect()
     }
 
@@ -278,8 +296,11 @@ impl ShellCapture {
     }
 
     fn file_samples(&self) -> Vec<RawSample> {
-        self.files
-            .drain()
+        let drained = match self.files.lock() {
+            Ok(files) => files.drain(),
+            Err(_) => Vec::new(),
+        };
+        drained
             .into_iter()
             .map(|(path, event_type, occurred)| RawSample {
                 kind: CaptureKind::File,

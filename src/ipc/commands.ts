@@ -986,6 +986,8 @@ export interface CaptureSettingsView {
   readonly redactionEnabled: boolean;
   readonly redactionTerms: number;
   readonly capabilities: readonly CaptureCapabilityView[];
+  /** 当前生效的受关注目录。为空时文件活动不可用。 */
+  readonly watchRoots: readonly string[];
 }
 
 export interface CaptureEventView {
@@ -1604,6 +1606,10 @@ export interface CommandMap {
     request: { seconds: number };
     response: CaptureSettingsView;
   };
+  capture_set_watch_roots: {
+    request: { paths: readonly string[] };
+    response: CaptureSettingsView;
+  };
   capture_collect: { request: Record<string, never>; response: CaptureOutcome };
   capture_events: {
     request: { kind?: CaptureKindKey; from?: string; to?: string; limit?: number };
@@ -1776,6 +1782,7 @@ export const COMMAND_NAMES: readonly CommandName[] = [
   "capture_set_paused",
   "capture_set_redaction",
   "capture_set_dedup",
+  "capture_set_watch_roots",
   "capture_collect",
   "capture_events",
   "capture_summaries",

@@ -156,6 +156,7 @@ export function SelfRealm({
   const [captures, setCaptures] = useState<readonly CaptureEventView[]>([]);
   const [captureAudit, setCaptureAudit] = useState<readonly CaptureAuditView[]>([]);
   const [captureKind, setCaptureKind] = useState<CaptureKindKey | "all">("all");
+  const [watchRootDraft, setWatchRootDraft] = useState("");
   const [self, setSelf] = useState<SelfReadiness | null>(null);
   const [draft, setDraft] = useState<SelfDraftDetail | null>(null);
   const [dataScope, setDataScope] = useState<DataScope | null>(null);
@@ -651,6 +652,18 @@ export function SelfRealm({
       );
     } catch {
       setNote("采集一轮失败");
+    }
+  }
+
+  /** 提交关注目录。校验与监听重建都在命令层完成，这里只在成功后刷新视图。 */
+  async function saveWatchRoots(paths: readonly string[]) {
+    setNote(null);
+    try {
+      setCapture(await client.call("capture_set_watch_roots", { paths: [...paths] }));
+      setCaptureAudit(await client.call("capture_audit", { limit: 12 }));
+      setNote(paths.length > 0 ? `已监听 ${paths.length} 个目录` : "已清空关注目录");
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : "关注目录设置失败");
     }
   }
 
@@ -1457,6 +1470,66 @@ export function SelfRealm({
                 授权后回到这里重新开启。其他能力不受影响。
               </p>
             ) : null}
+            <div className="capture-roots">
+              <span className="capture-roots__head">
+                <span className="setting-row__label">关注目录</span>
+                {capture.watchRoots.length > 0 ? (
+                  <span className="capture-roots__count mono">
+                    {capture.watchRoots.length} 个目录
+                  </span>
+                ) : null}
+              </span>
+              {capture.watchRoots.length > 0 ? (
+                <ul className="watch-roots" aria-label="关注目录">
+                  {capture.watchRoots.map((root) => (
+                    <li key={root} className="watch-root">
+                      <span className="watch-root__path mono">{root}</span>
+                      <button
+                        type="button"
+                        aria-label={`移除关注目录 ${root}`}
+                        className="watch-root__remove"
+                        onClick={() =>
+                          void saveWatchRoots(
+                            capture.watchRoots.filter((item) => item !== root),
+                        )
+                      }
+                    >
+                      移除
+                    </button>
+                  </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="capture-roots__empty">
+                  还没有关注目录，文件活动因此不可用。
+                </span>
+              )}
+              <div className="capture-roots__add">
+                <input
+                  type="text"
+                  className="mono"
+                  aria-label="新增关注目录"
+                  placeholder="粘贴一个绝对路径，例如 D:\\notes"
+                  value={watchRootDraft}
+                  onChange={(event) => setWatchRootDraft(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="capture-roots__submit"
+                  disabled={watchRootDraft.trim().length === 0}
+                  onClick={() => {
+                    void saveWatchRoots([...capture.watchRoots, watchRootDraft.trim()]);
+                    setWatchRootDraft("");
+                  }}
+                >
+                  添加
+                </button>
+              </div>
+              <span className="setting-row__hint">
+                只接受已存在的绝对路径，添加后立即生效，不需要重启。嵌套的目录会被合并，
+                避免同一文件重复上报。文件正文不会被读取，只记录路径与事件类型。
+              </span>
+            </div>
             <div className="setting-row">
               <span className="setting-row__label">脱敏</span>
               <button

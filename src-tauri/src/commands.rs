@@ -1972,6 +1972,29 @@ pub fn capture_set_dedup(
     capture_pipeline::settings_view(&conn, &state.capture.unavailable()).into()
 }
 
+/// 设置受关注目录，并立即重建文件监听，不需要重启应用。
+#[tauri::command]
+pub fn capture_set_watch_roots(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> CommandResult<CaptureSettingsView> {
+    let conn = lock(&state);
+    let roots = match capture_pipeline::normalize_watch_roots(&paths) {
+        Ok(roots) => roots,
+        Err(error) => return error.into(),
+    };
+    // 先换监听再落盘：建立监听会因权限或句柄耗尽失败，那时设置值保持不动，
+    // 界面显示的就仍是实际生效的目录。
+    let applied: Vec<std::path::PathBuf> = roots.iter().map(std::path::PathBuf::from).collect();
+    if let Err(error) = state.capture.set_watch_roots(applied) {
+        return error.into();
+    }
+    if let Err(error) = capture_repo::set_watch_roots(&conn, &roots) {
+        return error.into();
+    }
+    capture_pipeline::settings_view(&conn, &state.capture.unavailable()).into()
+}
+
 /// 触发一轮采集：剪贴板、前台窗口与受关注目录的文件活动。
 #[tauri::command]
 pub fn capture_collect(state: State<'_, AppState>) -> CommandResult<CaptureOutcome> {

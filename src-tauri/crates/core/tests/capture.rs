@@ -151,6 +151,57 @@ fn unavailable_capability_cannot_be_enabled() {
 }
 
 #[test]
+fn watch_roots_are_validated_and_persisted() {
+    let conn = db();
+    let view = capture_pipeline::settings_view(&conn, &[]).unwrap();
+    assert!(view.watch_roots.is_empty(), "默认没有关注目录");
+
+    let existing = std::env::temp_dir();
+    let submitted = vec![existing.display().to_string()];
+    let after = capture_pipeline::set_watch_roots(&conn, &submitted, &[]).unwrap();
+    assert_eq!(after.watch_roots, submitted);
+    // 设置值同样落盘，重启后由外壳读回。
+    assert_eq!(capture_repo::watch_roots(&conn).unwrap(), submitted);
+    let audit = capture_pipeline::list_audit(&conn, 10).unwrap();
+    assert_eq!(audit[0].action, "watch_roots");
+    assert_eq!(audit[0].kind, CaptureKind::File.as_str());
+
+    // 清空后目录为空，审计不追加（清空本身不算一次监听授权）。
+    let cleared = capture_pipeline::set_watch_roots(&conn, &[], &[]).unwrap();
+    assert!(cleared.watch_roots.is_empty());
+    assert_eq!(capture_pipeline::list_audit(&conn, 10).unwrap().len(), 1);
+}
+
+#[test]
+fn watch_roots_reject_relative_and_missing_paths() {
+    let relative = capture_pipeline::normalize_watch_roots(&["notes".to_string()]).unwrap_err();
+    assert_eq!(relative.code(), "E_INVALID_INPUT");
+    let missing = capture_pipeline::normalize_watch_roots(&[
+        "/definitely/not/a/real/directory/for/tests".to_string(),
+    ])
+    .unwrap_err();
+    assert_eq!(missing.code(), "E_INVALID_INPUT");
+
+    let nested = std::env::temp_dir();
+    let child = nested.join("tf-watch-child");
+    std::fs::create_dir_all(&child).unwrap();
+    // 子目录被父目录覆盖，丢弃子项避免同一文件重复上报。
+    let accepted = capture_pipeline::normalize_watch_roots(&[
+        nested.display().to_string(),
+        child.display().to_string(),
+    ])
+    .unwrap();
+    assert_eq!(accepted, vec![nested.display().to_string()]);
+    // 宽松版本遇坏项只丢弃该项，供启动时读设置使用。
+    let lenient = capture_pipeline::accepted_watch_roots(&[
+        "relative".to_string(),
+        nested.display().to_string(),
+    ]);
+    assert_eq!(lenient, vec![nested.display().to_string()]);
+    std::fs::remove_dir_all(&child).ok();
+}
+
+#[test]
 fn disabled_kind_is_skipped_and_not_written() {
     let mut conn = db();
     let source = ScriptedSource::new(vec![clipboard("待采纳的观点", "2026-09-14T10:00:00Z")]);

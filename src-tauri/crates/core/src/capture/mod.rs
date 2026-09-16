@@ -45,6 +45,10 @@ pub const MAX_EXCERPT_CHARS: usize = 120;
 
 pub const PAUSE_SETTING_KEY: &str = "capture.paused";
 pub const REDACTION_SETTING_KEY: &str = "capture.redaction";
+/// 受关注目录列表，值为 JSON 字符串数组。外壳据此建立文件监听。
+pub const WATCH_ROOTS_SETTING_KEY: &str = "capture.watch_roots";
+/// 受关注目录数量上限，避免一次挂上过多监听。
+pub const MAX_WATCH_ROOTS: usize = 16;
 
 /// 采集事件类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +111,8 @@ pub struct CaptureSettingsView {
     pub redaction_enabled: bool,
     pub redaction_terms: i64,
     pub capabilities: Vec<CaptureCapabilityView>,
+    /// 当前生效的受关注目录。为空时文件活动不可用。
+    pub watch_roots: Vec<String>,
 }
 
 /// 一条采集记录的对外视图。
