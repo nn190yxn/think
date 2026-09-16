@@ -1,3 +1,6 @@
+mod capture;
+#[cfg(windows)]
+mod capture_win;
 mod commands;
 mod connector;
 mod credential;

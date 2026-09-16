@@ -6,7 +6,8 @@
 import type { LayerKey } from "../domain/layers";
 
 /** 需要持久化的设置项。 */
-export type SettingKey = "theme";
+/** 通用设置键。采集的关注目录用 JSON 字符串数组表达。 */
+export type SettingKey = "theme" | "capture.watch_roots";
 
 export interface AppInfo {
   readonly name: string;

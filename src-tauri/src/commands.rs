@@ -15,7 +15,7 @@ use thought_forge_core::companion::{
 };
 use thought_forge_core::capture::{
     pipeline as capture_pipeline, repo as capture_repo, CaptureAuditView, CaptureEventView,
-    CaptureFilter, CaptureOutcome, CaptureSettingsView, CaptureSummaryView, NoopCaptureSource,
+    CaptureFilter, CaptureOutcome, CaptureSettingsView, CaptureSummaryView,
     RedactionRules,
 };
 use thought_forge_core::council::{
@@ -1873,15 +1873,10 @@ pub fn discovery_run(
 
 // ---------- P7 采集台 ----------
 
-/// 桌面外壳未接入系统采集源前，这里不提供任何系统级能力。
-fn capture_unavailable() -> Vec<&'static str> {
-    Vec::new()
-}
-
 #[tauri::command]
 pub fn capture_settings(state: State<'_, AppState>) -> CommandResult<CaptureSettingsView> {
     let conn = lock(&state);
-    capture_pipeline::settings_view(&conn, &capture_unavailable()).into()
+    capture_pipeline::settings_view(&conn, &state.capture.unavailable()).into()
 }
 
 /// 逐项开启或关闭采集能力，每次切换都写审计。
@@ -1892,7 +1887,7 @@ pub fn capture_set_capability(
     enabled: bool,
 ) -> CommandResult<CaptureSettingsView> {
     let conn = lock(&state);
-    capture_pipeline::set_capability(&conn, &kind, enabled, &capture_unavailable()).into()
+    capture_pipeline::set_capability(&conn, &kind, enabled, &state.capture.unavailable()).into()
 }
 
 /// 全局暂停或恢复。暂停期间采集链路不轮询、不写入。
@@ -1902,7 +1897,7 @@ pub fn capture_set_paused(
     paused: bool,
 ) -> CommandResult<CaptureSettingsView> {
     let conn = lock(&state);
-    capture_pipeline::set_paused(&conn, paused, &capture_unavailable()).into()
+    capture_pipeline::set_paused(&conn, paused, &state.capture.unavailable()).into()
 }
 
 #[tauri::command]
@@ -1922,7 +1917,7 @@ pub fn capture_set_redaction(
     if let Err(error) = result {
         return error.into();
     }
-    capture_pipeline::settings_view(&conn, &capture_unavailable()).into()
+    capture_pipeline::settings_view(&conn, &state.capture.unavailable()).into()
 }
 
 #[tauri::command]
@@ -1935,10 +1930,10 @@ pub fn capture_set_dedup(
     if let Err(error) = result {
         return error.into();
     }
-    capture_pipeline::settings_view(&conn, &capture_unavailable()).into()
+    capture_pipeline::settings_view(&conn, &state.capture.unavailable()).into()
 }
 
-/// 触发一轮采集。系统级抓取由外壳注入采集源，这里先跑空源保证链路可用。
+/// 触发一轮采集：剪贴板、前台窗口与受关注目录的文件活动。
 #[tauri::command]
 pub fn capture_collect(state: State<'_, AppState>) -> CommandResult<CaptureOutcome> {
     let mut conn = lock(&state);
@@ -1946,7 +1941,7 @@ pub fn capture_collect(state: State<'_, AppState>) -> CommandResult<CaptureOutco
         Ok(value) => value,
         Err(error) => return error.into(),
     };
-    capture_pipeline::collect_once(&mut conn, &NoopCaptureSource, &now).into()
+    capture_pipeline::collect_once(&mut conn, &state.capture, &now).into()
 }
 
 #[tauri::command]
