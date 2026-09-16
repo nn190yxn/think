@@ -1445,7 +1445,9 @@ export function SelfRealm({
                       ? capability.consentedAt
                         ? `已同意 · ${capability.consentedAt.slice(0, 10)}`
                         : "尚未开启"
-                      : "炉口闭合 · 系统权限被拒"}
+                      : capability.kind === "file"
+                        ? "炉口闭合 · 未设置关注目录"
+                        : "炉口闭合 · 系统权限被拒"}
                   </span>
                   <button
                     className="switch"
@@ -1464,7 +1466,10 @@ export function SelfRealm({
                 </li>
               ))}
             </ul>
-            {capture.capabilities.some((capability) => !capability.available) ? (
+            {/* 文件活动由关注目录决定，原因在下方区块里说明，不走系统授权的说法。 */}
+            {capture.capabilities.some(
+              (capability) => !capability.available && capability.kind !== "file",
+            ) ? (
               <p className="setting-row__hint" data-tone="warn">
                 炉口闭合的能力已被系统拒绝：请前往系统设置的隐私与安全页面授权，
                 授权后回到这里重新开启。其他能力不受影响。
