@@ -1220,7 +1220,7 @@ export const stubTransport: CommandTransport = {
         };
         return { ok: true, data: demoCapture };
       case "capture_set_watch_roots": {
-        // 与外壳一致：目录为空时文件活动标记为系统不可用。
+        // 与外壳一致：只翻转可用性，不动用户已给出的开启同意（同意与否有其审计含义）。
         const paths = Array.isArray(payload.paths)
           ? payload.paths.map((item) => String(item))
           : [];
@@ -1229,12 +1229,7 @@ export const stubTransport: CommandTransport = {
           watchRoots: paths,
           capabilities: demoCapture.capabilities.map((item) =>
             item.kind === "file"
-              ? {
-                  ...item,
-                  available: paths.length > 0,
-                  enabled: paths.length > 0 ? item.enabled : false,
-                  consentedAt: paths.length > 0 ? item.consentedAt : null,
-                }
+              ? { ...item, available: paths.length > 0 }
               : item,
           ),
         };
