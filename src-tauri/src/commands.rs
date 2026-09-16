@@ -692,7 +692,15 @@ fn self_exclusion(session: &SessionView) -> Vec<String> {
 #[tauri::command]
 pub fn council_run(state: State<'_, AppState>, session_id: String) -> CommandResult<CouncilOutcome> {
     let conn = lock(&state);
-    let shell = ShellConnector::new();
+    // 连接器受全局联网开关约束：关闭时不装配任何外部能力，编排按「未获得外部背景」继续。
+    let enabled = match networking_enabled(&conn) {
+        Ok(enabled) => enabled,
+        Err(error) => return error.into(),
+    };
+    let shell = match ShellConnector::from_db(&conn, enabled) {
+        Ok(shell) => shell,
+        Err(error) => return error.into(),
+    };
     let retrieval = shell.retrieval();
     with_model_client(&conn, &retrieval, |client, retrieval| {
         let policy = RetryPolicy::default();
@@ -898,15 +906,19 @@ pub fn connector_upsert(
     };
     let result = (|| -> CoreResult<ConnectorView> {
         if input.kind.trim() == thought_forge_core::connector::KIND_MCP {
-            // 占位实现没有工具能力声明，因此这里会拒绝把任意服务器当作工具服务器接入。
-            let provider = thought_forge_core::connector::NoopToolProvider;
+            // 只有能返回工具能力声明的服务器才准写入，拒绝把第三方运行时当工具服务器接入。
+            let provider = crate::connector::tool_provider(
+                &input.endpoint,
+                input.id.as_deref(),
+            )?;
             let tools = thought_forge_core::connector::validate_tools(&provider)?;
             let mut input = input.clone();
             input.config = serde_json::json!({ "tools": tools });
             connector_repo::upsert(&conn, &input)
         } else if input.kind.trim() == thought_forge_core::connector::KIND_SEARCH {
             ensure_provider_ready(&input.endpoint, |endpoint| {
-                let provider = crate::connector::PlaceholderSearch::new(endpoint);
+                let provider =
+                    crate::connector::search_provider(endpoint, input.id.as_deref())?;
                 provider.search("__probe__", 1).map(|_| ())
             })?;
             connector_repo::upsert(&conn, &input)
@@ -976,7 +988,8 @@ pub fn connector_test(
         let started = std::time::Instant::now();
         let outcome = match view.kind.as_str() {
             thought_forge_core::connector::KIND_SEARCH => {
-                let provider = crate::connector::PlaceholderSearch::new(view.endpoint.clone());
+                let provider =
+                    crate::connector::search_provider(&view.endpoint, Some(&view.id))?;
                 let sent = prepared
                     .as_ref()
                     .map(|item| item.sent.clone())
@@ -986,13 +999,14 @@ pub fn connector_test(
                     .map(|hits| format!("检索可用，返回 {} 条结果", hits.len()))
             }
             thought_forge_core::connector::KIND_PAGE => {
-                let provider = crate::connector::PlaceholderPage::new(view.endpoint.clone());
+                let provider = crate::connector::page_reader()?;
                 provider.read(&view.endpoint).map(|page| {
                     format!("网页可读，正文 {} 字", page.text.chars().count())
                 })
             }
             thought_forge_core::connector::KIND_MCP => {
-                let provider = thought_forge_core::connector::NoopToolProvider;
+                let provider =
+                    crate::connector::tool_provider(&view.endpoint, Some(&view.id))?;
                 thought_forge_core::connector::validate_tools(&provider)
                     .map(|tools| format!("工具服务器可用，声明 {} 个工具", tools.len()))
             }
@@ -1113,7 +1127,10 @@ pub fn council_search(
                 hits: Vec::new(),
             });
         }
-        let provider = crate::connector::PlaceholderSearch::new(connector.endpoint.clone());
+        let provider = crate::connector::search_provider(
+            &connector.endpoint,
+            Some(&connector.id),
+        )?;
         let max = limit.unwrap_or_else(|| {
             council_tuning::int_of(&conn, "connector.max_results").unwrap_or(6)
         });

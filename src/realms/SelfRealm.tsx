@@ -49,6 +49,13 @@ const CONNECTOR_KINDS: readonly { readonly kind: string; readonly label: string 
   { kind: "mcp", label: "MCP 工具" },
 ];
 
+/** 各类型连接器地址的样例，避免用户不知道要填什么格式。 */
+const CONNECTOR_PLACEHOLDERS: Record<string, string> = {
+  search: "SearXNG 兼容地址，如 http://localhost:8080",
+  page: "待抓取的网页地址，如 https://example.com/post",
+  mcp: "MCP 服务器地址，如 https://example.com/mcp",
+};
+
 const CONNECTOR_PURPOSE_LABELS: Record<string, string> = {
   council_background: "共享背景检索",
   council_seat_search: "席位补充检索",
@@ -1080,7 +1087,7 @@ export function SelfRealm({
             id="connector-endpoint"
             className="connector-input"
             value={connectorEndpoint}
-            placeholder="https://..."
+            placeholder={CONNECTOR_PLACEHOLDERS[connectorKind] ?? "https://..."}
             onChange={(event) => setConnectorEndpoint(event.target.value)}
           />
         </div>
