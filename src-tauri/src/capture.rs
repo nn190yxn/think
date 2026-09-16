@@ -387,10 +387,11 @@ mod tests {
         std::fs::create_dir_all(&root).expect("建立临时目录");
         let capture = ShellCapture::new(vec![root.clone()]).expect("建立采集源");
 
-        // 监听由 notify 的独立线程投递，给事件留出送达时间。
+        // 监听由 notify 的独立线程投递，给事件留出送达时间。上限给到 10 秒：
+        // 只用 2 秒时，若本轮构建/测试正把 CPU 占满，事件送达会被推迟而误报失败。
         std::fs::write(root.join("note.md"), "内容").expect("写入文件");
         let mut found = Vec::new();
-        for _ in 0..40 {
+        for _ in 0..200 {
             found = capture.file_samples();
             if !found.is_empty() {
                 break;
@@ -398,7 +399,11 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
-        assert!(!found.is_empty(), "应采集到文件活动");
+        assert!(
+            !found.is_empty(),
+            "等了 10 秒仍未收到 {} 下的文件事件",
+            root.display()
+        );
         assert_eq!(found[0].kind, CaptureKind::File);
         assert!(found[0].text.ends_with("note.md"));
         let payload = &found[0].payload;
