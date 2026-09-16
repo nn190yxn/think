@@ -9,12 +9,16 @@
 //!
 //! 选项：
 //!   --secret <值>              扫描全库，确认该密钥未落库（V4 / V15）
+//!   --expect-platform <code>   要求该模型平台处于 ready（V2）
 //!   --expect-search            要求存在一次成功的检索调用（V11）
 //!   --expect-capture <类型,...> 要求这些采集类型已有记录（V8）
+//!   --expect-mcp               要求存在一次成功的 MCP 工具调用（V13）
+//!   --expect-distill           要求存在一次已完成的蒸馏任务（V7）
 //!   --expect-flagged           要求存在被标记的外部来源（V18）
 //!   --expect-pre-migration     要求存在迁移前自动备份（V17）
 //!
 //! 退出码：0 全部通过或跳过，1 存在未通过项，2 用法错误。
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -79,16 +83,20 @@ impl Check {
 struct Options {
     db: PathBuf,
     secret: Option<String>,
+    expect_platform: Option<String>,
     expect_search: bool,
     expect_capture: Vec<String>,
+    expect_mcp: bool,
+    expect_distill: bool,
     expect_flagged: bool,
     expect_pre_migration: bool,
 }
 
 fn usage() -> ! {
     eprintln!(
-        "用法：forge_verify <forge.db 路径> [--secret <值>] [--expect-search] \
-         [--expect-capture <类型,...>] [--expect-flagged] [--expect-pre-migration]"
+        "用法：forge_verify <forge.db 路径> [--secret <值>] [--expect-platform <code>] \
+         [--expect-search] [--expect-capture <类型,...>] [--expect-mcp] [--expect-distill] \
+         [--expect-flagged] [--expect-pre-migration]"
     );
     std::process::exit(2);
 }
@@ -101,8 +109,11 @@ fn parse_args() -> Options {
     let mut options = Options {
         db: PathBuf::from(db),
         secret: None,
+        expect_platform: None,
         expect_search: false,
         expect_capture: Vec::new(),
+        expect_mcp: false,
+        expect_distill: false,
         expect_flagged: false,
         expect_pre_migration: false,
     };
@@ -114,7 +125,15 @@ fn parse_args() -> Options {
                     usage();
                 }
             }
+            "--expect-platform" => {
+                options.expect_platform = args.next();
+                if options.expect_platform.is_none() {
+                    usage();
+                }
+            }
             "--expect-search" => options.expect_search = true,
+            "--expect-mcp" => options.expect_mcp = true,
+            "--expect-distill" => options.expect_distill = true,
             "--expect-flagged" => options.expect_flagged = true,
             "--expect-pre-migration" => options.expect_pre_migration = true,
             "--expect-capture" => {
@@ -229,6 +248,400 @@ fn text_columns(conn: &Connection, table: &str) -> rusqlite::Result<Vec<String>>
         }
     }
     Ok(columns)
+}
+
+/// V2：存储状态必须与「启用 + 配置是否完整」派生出的状态一致。
+fn check_platforms(conn: &Connection, options: &Options, checks: &mut Vec<Check>) {
+    let mut check = Check::new("V2", "平台配置与状态一致");
+    let mut stmt = match conn.prepare(
+        "SELECT code, endpoint, model_name, enabled, status FROM ai_platforms ORDER BY code",
+    ) {
+        Ok(stmt) => stmt,
+        Err(error) => {
+            check.fail(error.to_string());
+            checks.push(check);
+            return;
+        }
+    };
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)? == 1,
+            row.get::<_, String>(4)?,
+        ))
+    });
+    let Ok(rows) = rows else {
+        check.fail("读取平台配置失败");
+        checks.push(check);
+        return;
+    };
+
+    let mut total = 0i64;
+    let mut ready = Vec::new();
+    let mut matched = false;
+    for row in rows.flatten() {
+        let (code, endpoint, model_name, enabled, status) = row;
+        total += 1;
+        // 与内核 platform::status_of 保持同一套派生规则。
+        let derived = if endpoint.trim().is_empty() || model_name.trim().is_empty() {
+            "unconfigured"
+        } else if enabled {
+            "ready"
+        } else {
+            "disabled"
+        };
+        check.note(format!(
+            "{code}：状态={status} 启用={} 端点={} 模型={}",
+            if enabled { "是" } else { "否" },
+            blank_as(&endpoint, "空"),
+            blank_as(&model_name, "空"),
+        ));
+        if status != derived {
+            check.fail(format!("{code} 存储状态为 {status}，按配置应为 {derived}"));
+        }
+        if status == "ready" {
+            ready.push(code.clone());
+        }
+        if options.expect_platform.as_deref() == Some(code.as_str()) {
+            matched = true;
+            if status != "ready" {
+                check.fail(format!("要求 {code} 处于 ready，实际为 {status}"));
+            }
+        }
+    }
+    check.note(format!("平台 {total} 个，ready：{}", list_or_none(&ready)));
+    if let Some(code) = options.expect_platform.as_deref() {
+        if !matched {
+            check.fail(format!("要求 {code} 处于 ready，但库中没有该平台"));
+        }
+    }
+    checks.push(check);
+}
+
+fn blank_as(text: &str, fallback: &str) -> String {
+    if text.trim().is_empty() {
+        fallback.to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn list_or_none(items: &[String]) -> String {
+    if items.is_empty() {
+        "无".to_string()
+    } else {
+        items.join(" | ")
+    }
+}
+
+/// V6：会诊链路留下的记录必须自洽，且历史可复现。
+fn check_council(conn: &Connection, checks: &mut Vec<Check>) {
+    let mut check = Check::new("V6", "会诊链路与调用审计");
+    let sessions = scalar_i64(conn, "SELECT COUNT(*) FROM council_sessions");
+    if sessions == 0 {
+        check.skip("尚无会诊会话，先跑一次会诊");
+        checks.push(check);
+        return;
+    }
+
+    check.note(format!(
+        "会话 {sessions} 场，阵容 {} 条，发言 {} 条，轮次指标 {} 条",
+        scalar_i64(conn, "SELECT COUNT(*) FROM council_panels"),
+        scalar_i64(conn, "SELECT COUNT(*) FROM council_turns"),
+        scalar_i64(conn, "SELECT COUNT(*) FROM council_round_metrics"),
+    ));
+
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT role, status, COUNT(*) FROM council_turns
+         GROUP BY role, status ORDER BY role, status",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        }) {
+            for (role, status, count) in rows.flatten() {
+                check.note(format!("发言 {role} / {status}：{count} 条"));
+            }
+        }
+    }
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT purpose, COUNT(*) FROM llm_calls WHERE purpose LIKE 'council%'
+         GROUP BY purpose ORDER BY purpose",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        }) {
+            for (purpose, count) in rows.flatten() {
+                check.note(format!("模型调用 {purpose}：{count} 次"));
+            }
+        }
+    }
+
+    // 成功的席位发言必须锁定大师与版本，否则历史无法复现。
+    let unlocked = scalar_i64(
+        conn,
+        "SELECT COUNT(*) FROM council_turns
+         WHERE status = 'ok' AND role IN ('answer', 'cross')
+           AND (master_id IS NULL OR master_version IS NULL)",
+    );
+    if unlocked > 0 {
+        check.fail(format!(
+            "{unlocked} 条成功的席位发言没有锁定大师或版本，历史不可复现"
+        ));
+    }
+    // 失败发言必须带错误码，否则界面无从解释。
+    let silent = scalar_i64(
+        conn,
+        "SELECT COUNT(*) FROM council_turns
+         WHERE status != 'ok' AND COALESCE(TRIM(error_code), '') = ''",
+    );
+    if silent > 0 {
+        check.fail(format!("{silent} 条失败发言没有错误码"));
+    }
+    // 发言引用的阵容必须存在，否则轮次归属断链。
+    let orphan = scalar_i64(
+        conn,
+        "SELECT COUNT(*) FROM council_turns AS t
+         WHERE NOT EXISTS (
+             SELECT 1 FROM council_panels AS p
+             WHERE p.session_id = t.session_id AND p.rotation = t.panel_rotation
+         )",
+    );
+    if orphan > 0 {
+        check.fail(format!("{orphan} 条发言找不到对应的阵容记录"));
+    }
+
+    let done = scalar_i64(conn, "SELECT COUNT(*) FROM council_sessions WHERE status = 'done'");
+    let with_conclusion = scalar_i64(
+        conn,
+        "SELECT COUNT(*) FROM council_sessions
+         WHERE status IN ('done', 'cancelled') AND TRIM(conclusion) != ''",
+    );
+    check.note(format!("已完成 {done} 场，有结论 {with_conclusion} 场"));
+    checks.push(check);
+}
+
+/// V12：席位补充检索必须归属到该场阵容里的席位，共享背景不带席位归属。
+fn check_retrieval_isolation(conn: &Connection, checks: &mut Vec<Check>) {
+    let mut check = Check::new("V12", "检索归属与共享背景");
+    let total = scalar_i64(conn, "SELECT COUNT(*) FROM council_sources");
+    if total == 0 {
+        check.skip("尚无检索快照，先跑一次带检索的会诊");
+        checks.push(check);
+        return;
+    }
+
+    // 先把阵容读进内存：键为 (session_id, rotation)。
+    let mut panels: std::collections::HashMap<(String, i64), HashSet<String>> =
+        std::collections::HashMap::new();
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT session_id, rotation, master_ids_json FROM council_panels")
+    {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }) {
+            for (session_id, rotation, raw) in rows.flatten() {
+                let ids = serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default();
+                panels.insert((session_id, rotation), ids.into_iter().collect());
+            }
+        }
+    }
+
+    let shared = scalar_i64(conn, "SELECT COUNT(*) FROM council_sources WHERE master_id IS NULL");
+    let seat = total - shared;
+    check.note(format!("共享背景 {shared} 条，席位补充 {seat} 条"));
+
+    let mut mismatched = 0i64;
+    let mut orphan = 0i64;
+    let mut stmt = match conn.prepare(
+        "SELECT session_id, panel_rotation, COALESCE(master_id, ''), COALESCE(title, '')
+         FROM council_sources WHERE master_id IS NOT NULL",
+    ) {
+        Ok(stmt) => stmt,
+        Err(error) => {
+            check.fail(error.to_string());
+            checks.push(check);
+            return;
+        }
+    };
+    if let Ok(rows) = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    }) {
+        for (session_id, rotation, master_id, title) in rows.flatten() {
+            let key = (session_id.clone(), rotation);
+            match panels.get(&key) {
+                None => {
+                    orphan += 1;
+                    check.note(format!("席位来源找不到阵容：{session_id} / 第 {rotation} 次"));
+                }
+                Some(ids) if !ids.contains(&master_id) => {
+                    mismatched += 1;
+                    check.note(format!(
+                        "席位来源归属 {master_id}，但该场阵容没有这个大师（{title}）"
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    if orphan > 0 {
+        check.fail(format!("{orphan} 条席位来源找不到对应阵容"));
+    }
+    if mismatched > 0 {
+        check.fail(format!("{mismatched} 条席位来源挂在不在该场阵容的大师名下"));
+    }
+    checks.push(check);
+}
+
+/// V13：三类连接器的配置与调用都留有审计。
+fn check_connectors(conn: &Connection, options: &Options, checks: &mut Vec<Check>) {
+    let mut check = Check::new("V13", "连接器类型覆盖与审计");
+    let configured = scalar_i64(conn, "SELECT COUNT(*) FROM connectors");
+    if configured == 0 {
+        check.skip("尚未配置任何连接器");
+        checks.push(check);
+        return;
+    }
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT kind, COUNT(*), SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END),
+                GROUP_CONCAT(status, ',')
+         FROM connectors GROUP BY kind ORDER BY kind",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        }) {
+            for (kind, count, enabled, statuses) in rows.flatten() {
+                check.note(format!(
+                    "连接器 {kind}：{count} 个，启用 {enabled} 个，状态 {statuses}"
+                ));
+            }
+        }
+    }
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT kind, purpose, status, COUNT(*) FROM connector_calls
+         GROUP BY kind, purpose, status ORDER BY kind, purpose, status",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        }) {
+            for (kind, purpose, status, count) in rows.flatten() {
+                check.note(format!("调用 {kind} / {purpose} / {status}：{count} 次"));
+            }
+        }
+    }
+
+    // 未声明工具的服务端在配置阶段就被拒；测通过的 MCP 才该留下成功调用。
+    let ok_mcp = scalar_i64(
+        conn,
+        "SELECT COUNT(*) FROM connector_calls WHERE kind = 'mcp' AND status = 'ok'",
+    );
+    check.note(format!("MCP 调用成功 {ok_mcp} 次"));
+    if options.expect_mcp && ok_mcp == 0 {
+        check.fail("要求存在一次成功的 MCP 工具调用，但一次都没有");
+    }
+    checks.push(check);
+}
+
+/// V7：蒸馏产出技能单元并按版本安装，版本记录与单元数一致。
+fn check_distill(conn: &Connection, options: &Options, checks: &mut Vec<Check>) {
+    let mut check = Check::new("V7", "蒸馏产出与版本一致");
+    let jobs = scalar_i64(conn, "SELECT COUNT(*) FROM distill_jobs");
+    check.note(format!("蒸馏任务 {jobs} 个"));
+    if jobs > 0 {
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT state, stage, COUNT(*) FROM distill_jobs
+             GROUP BY state, stage ORDER BY state, stage",
+        ) {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            }) {
+                for (state, stage, count) in rows.flatten() {
+                    check.note(format!("任务 {state} / {stage}：{count} 个"));
+                }
+            }
+        }
+    }
+
+    let masters = scalar_i64(conn, "SELECT COUNT(*) FROM masters");
+    let units = scalar_i64(conn, "SELECT COUNT(*) FROM master_units");
+    check.note(format!("大师 {masters} 位，技能单元 {units} 条"));
+    if masters == 0 {
+        if jobs == 0 {
+            check.skip("尚无蒸馏任务与大师包");
+        } else {
+            check.fail("有蒸馏任务但没有安装任何大师包");
+        }
+        checks.push(check);
+        return;
+    }
+
+    // 安装时写入的 unit_count 应与该版本实际单元数一致。
+    let mismatched = scalar_i64(
+        conn,
+        "SELECT COUNT(*) FROM master_versions AS v
+         WHERE v.unit_count != (
+             SELECT COUNT(*) FROM master_units AS u
+             WHERE u.master_id = v.master_id AND u.version = v.version
+         )",
+    );
+    if mismatched > 0 {
+        check.fail(format!("{mismatched} 条版本记录的单元数与实际单元数不一致"));
+    }
+    // 当前版本必须有对应的版本记录，否则来源与差异无从追溯。
+    let unrecorded = scalar_i64(
+        conn,
+        "SELECT COUNT(*) FROM masters AS m
+         WHERE NOT EXISTS (
+             SELECT 1 FROM master_versions AS v
+             WHERE v.master_id = m.id AND v.version = m.current_version
+         )",
+    );
+    if unrecorded > 0 {
+        check.fail(format!("{unrecorded} 位大师的当前版本没有版本记录"));
+    }
+
+    let done = scalar_i64(conn, "SELECT COUNT(*) FROM distill_jobs WHERE state = 'done'");
+    let revised = scalar_i64(conn, "SELECT COUNT(*) FROM masters WHERE current_version >= 2");
+    check.note(format!(
+        "已完成任务 {done} 个，版本达到 2 及以上的大师 {revised} 位"
+    ));
+    if options.expect_distill {
+        if done == 0 {
+            check.fail("要求存在已完成的蒸馏任务，但没有");
+        }
+        if revised == 0 {
+            check.fail("要求存在被更新为新版本的大师，但没有");
+        }
+    }
+    checks.push(check);
 }
 
 /// V5：最新一条模型调用审计字段齐全。
@@ -604,11 +1017,16 @@ fn main() -> ExitCode {
     let mut checks = Vec::new();
     check_schema(&conn, &mut checks);
     check_network_ready(&conn, &mut checks);
+    check_platforms(&conn, &options, &mut checks);
     check_secret(&conn, &options, &mut checks);
     check_llm_audit(&conn, &mut checks);
+    check_council(&conn, &mut checks);
+    check_distill(&conn, &options, &mut checks);
     check_capture(&conn, &options, &mut checks);
     check_search(&conn, &options, &mut checks);
     check_query_redaction(&conn, &mut checks);
+    check_connectors(&conn, &options, &mut checks);
+    check_retrieval_isolation(&conn, &mut checks);
     check_backups(&conn, &options, &mut checks);
     check_external_sources(&conn, &options, &mut checks);
 
