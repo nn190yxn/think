@@ -627,6 +627,54 @@ pub fn tool_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    /// 只监听回环地址的一次性 HTTP 服务：按顺序应答给定响应，并收集收到的原始请求。
+    ///
+    /// 响应一律带 `Connection: close`，让每个请求各占一条连接，避免客户端复用连接
+    /// 导致服务端在第二个请求上等待。
+    struct TestServer {
+        base: String,
+        handle: std::thread::JoinHandle<Vec<String>>,
+    }
+
+    impl TestServer {
+        fn start(responses: Vec<String>) -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("绑定回环端口");
+            let addr = listener.local_addr().expect("取得端口");
+            let handle = std::thread::spawn(move || {
+                let mut seen = Vec::new();
+                for response in responses {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        break;
+                    };
+                    let mut buffer = [0u8; 8192];
+                    let read = stream.read(&mut buffer).unwrap_or(0);
+                    seen.push(String::from_utf8_lossy(&buffer[..read]).into_owned());
+                    let _ = stream.write_all(response.as_bytes());
+                    let _ = stream.flush();
+                }
+                seen
+            });
+            Self {
+                base: format!("http://{addr}"),
+                handle,
+            }
+        }
+
+        /// 等待服务端读完固定数量的请求并返回原始请求文本。
+        fn requests(self) -> Vec<String> {
+            self.handle.join().unwrap_or_default()
+        }
+    }
+
+    fn http_response(status: &str, headers: &[(&str, &str)], body: &str) -> String {
+        let mut head = format!("HTTP/1.1 {status}\r\nConnection: close\r\n");
+        for (name, value) in headers {
+            head.push_str(&format!("{name}: {value}\r\n"));
+        }
+        format!("{head}Content-Length: {}\r\n\r\n{body}", body.len())
+    }
 
     #[test]
     fn query_encoding_keeps_unreserved_and_escapes_rest() {
@@ -732,5 +780,91 @@ mod tests {
         assert_eq!(tool_output(&failed).unwrap_err().code(), "E_MALFORMED_RESPONSE");
         let rpc_error = json!({"error": {"code": -32601, "message": "方法不存在"}});
         assert!(tool_output(&rpc_error).unwrap_err().to_string().contains("方法不存在"));
+    }
+
+    #[test]
+    fn search_provider_round_trips_against_http() {
+        let body = r#"{"results":[{"title":"标题","url":"https://a.example/1","content":"摘要","publishedDate":"2026-09-15T00:00:00Z"}]}"#;
+        let server = TestServer::start(vec![http_response(
+            "200 OK",
+            &[("Content-Type", "application/json")],
+            body,
+        )]);
+        let provider = HttpSearchProvider::new(&server.base, "").expect("装配成功");
+        let hits = provider.search("hello world", 3).expect("检索成功");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].url, "https://a.example/1");
+        let requests = server.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0].starts_with("GET /search?q=hello%20world&format=json&limit=3 "),
+            "实际请求首行：{}",
+            requests[0].lines().next().unwrap_or_default()
+        );
+    }
+
+    #[test]
+    fn search_provider_maps_http_failure_to_auditable_error() {
+        let server = TestServer::start(vec![http_response(
+            "503 Service Unavailable",
+            &[("Content-Type", "text/plain")],
+            "检索服务未就绪",
+        )]);
+        let provider = HttpSearchProvider::new(&server.base, "secret").expect("装配成功");
+        let error = provider.search("q", 1).unwrap_err();
+        assert_eq!(error.code(), "E_NETWORK_OFF");
+        assert!(error.to_string().contains("503"));
+        // 配了密钥时按 Bearer 发送，但密钥本身不出现在错误信息里。
+        assert!(!error.to_string().contains("secret"));
+        let requests = server.requests();
+        assert!(requests[0].to_ascii_lowercase().contains("authorization: bearer secret"));
+    }
+
+    #[test]
+    fn page_reader_extracts_text_over_http() {
+        let html = "<html><head><title>页面标题</title><style>p{}</style></head>\
+                    <body><script>track()</script><p>正文一</p><p>正文二</p></body></html>";
+        let server = TestServer::start(vec![http_response(
+            "200 OK",
+            &[("Content-Type", "text/html")],
+            html,
+        )]);
+        let reader = HttpPageReader::new().expect("装配成功");
+        let page = reader.read(&server.base).expect("抓取成功");
+        assert_eq!(page.title, "页面标题");
+        assert!(page.text.contains("正文一"));
+        assert!(page.text.contains("正文二"));
+        assert!(!page.text.contains("track()"));
+    }
+
+    #[test]
+    fn tool_provider_handshakes_and_reuses_session() {
+        let handshake = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{}}}"#;
+        let tools = r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"search","description":"检索","inputSchema":{"type":"object"}}]}}"#;
+        let server = TestServer::start(vec![
+            http_response(
+                "200 OK",
+                &[
+                    ("Content-Type", "application/json"),
+                    ("Mcp-Session-Id", "sess-1"),
+                ],
+                handshake,
+            ),
+            http_response("202 Accepted", &[], ""),
+            http_response("200 OK", &[("Content-Type", "application/json")], tools),
+        ]);
+        let provider = HttpToolProvider::new(&server.base, "").expect("装配成功");
+        let specs = provider.list_tools().expect("读取工具清单成功");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].name, "search");
+        let requests = server.requests();
+        assert_eq!(requests.len(), 3);
+        let lower: Vec<String> = requests.iter().map(|item| item.to_ascii_lowercase()).collect();
+        assert!(lower[0].contains("\"method\":\"initialize\""));
+        assert!(lower[1].contains("\"method\":\"notifications/initialized\""));
+        assert!(lower[2].contains("\"method\":\"tools/list\""));
+        // 握手拿到的会话标识要带上后续请求，避免服务器拒绝。
+        assert!(!lower[0].contains("mcp-session-id"));
+        assert!(lower[2].contains("mcp-session-id: sess-1"));
     }
 }
