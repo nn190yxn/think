@@ -59,6 +59,7 @@ const CONNECTOR_PLACEHOLDERS: Record<string, string> = {
 const CONNECTOR_PURPOSE_LABELS: Record<string, string> = {
   council_background: "共享背景检索",
   council_seat_search: "席位补充检索",
+  distill_discovery: "主动搜集检索",
   connector_test: "连通测试",
 };
 

@@ -21,6 +21,7 @@ pub const CONNECTOR_KINDS: [&str; 3] = [KIND_SEARCH, KIND_PAGE, KIND_MCP];
 /// 调用审计里的用途标识。
 pub const PURPOSE_BACKGROUND: &str = "council_background";
 pub const PURPOSE_SEAT_SEARCH: &str = "council_seat_search";
+pub const PURPOSE_DISCOVERY: &str = "distill_discovery";
 pub const PURPOSE_TEST: &str = "connector_test";
 
 /// 网页正文快照的长度上限，超出截断。

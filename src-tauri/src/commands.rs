@@ -37,9 +37,7 @@ use thought_forge_core::cost::{self, CostEstimate, CostSummary};
 use thought_forge_core::credential::{self, CredentialRefView};
 use thought_forge_core::data::service as data_service;
 use thought_forge_core::data::{DataEventView, DataScope, ExportOutcome, PurgeOutcome};
-use thought_forge_core::distill::intake::{
-    self as intake_service, BlockedDiscovery, ManualIntakeInput,
-};
+use thought_forge_core::distill::intake::{self as intake_service, ManualIntakeInput};
 use thought_forge_core::distill::{
     pipeline as distill_pipeline, repo as distill_repo, DiscoveryOutcome, DiscoverySettings,
     DistillDetail, DistillJobView, IntakeJobView, IntakeMaterial, SignalView,
@@ -70,6 +68,7 @@ use crate::protocol::CommandResult;
 use crate::state::AppState;
 
 use crate::connector::ShellConnector;
+use crate::discovery;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1859,7 +1858,47 @@ pub fn discovery_run(
     query: Option<String>,
 ) -> CommandResult<DiscoveryOutcome> {
     let conn = lock(&state);
-    let client = BlockedDiscovery::unavailable("尚未接入公开资料检索能力");
+    let enabled = match networking_enabled(&conn) {
+        Ok(enabled) => enabled,
+        Err(error) => return error.into(),
+    };
+    let shell = match ShellConnector::from_db(&conn, enabled) {
+        Ok(shell) => shell,
+        Err(error) => return error.into(),
+    };
+
+    // 主动搜集同样是外部请求：拿不到检索能力时明确报因，不静默返回空清单。
+    let Some(provider) = shell.search() else {
+        let offline = discovery::OfflineDiscovery::new(if enabled {
+            "尚未启用检索连接器"
+        } else {
+            "联网能力已关闭，先在设置页开启检索连接器"
+        });
+        return intake_service::run_discovery(
+            &conn,
+            &offline,
+            &master_id,
+            &master_name,
+            &domain,
+            query.as_deref(),
+        )
+        .into();
+    };
+
+    let max_results = match council_tuning::int_of(&conn, "connector.max_results") {
+        Ok(value) => value.clamp(1, 20) as usize,
+        Err(error) => return error.into(),
+    };
+    let mode = match council_tuning::value_of(&conn, "connector.query_mode") {
+        Ok(value) => value,
+        Err(error) => return error.into(),
+    };
+    let client = discovery::ShellDiscovery {
+        conn: &conn,
+        search: provider,
+        max_results,
+        mode,
+    };
     intake_service::run_discovery(
         &conn,
         &client,

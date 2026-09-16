@@ -601,6 +601,11 @@ impl ShellConnector {
                 .map(|provider| provider as &dyn PageReader),
         }
     }
+
+    /// 单独取出检索能力，供会诊之外的调用方（主动搜集）复用同一装配规则。
+    pub fn search(&self) -> Option<&HttpSearchProvider> {
+        self.search.as_ref()
+    }
 }
 
 /// 按配置装配一个检索连接器，供配置预检与连通测试使用。

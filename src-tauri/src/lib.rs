@@ -4,6 +4,7 @@ mod capture_win;
 mod commands;
 mod connector;
 mod credential;
+mod discovery;
 mod model;
 mod protocol;
 mod state;
