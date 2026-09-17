@@ -8,8 +8,11 @@ use crate::util::unique_id;
 
 use super::{
     DivergenceView, MasterHistoryEntry, PanelView, RoundMetric, SeatRef, Selection, SessionDetail,
-    SessionView, Strategy, TurnView,
+    SessionView, StanceView, Strategy, TurnView,
 };
+
+/// 立场摘要保留的字数上限，超过则截断。
+const MAX_STANCE_CHARS: usize = 80;
 
 pub(crate) fn now(conn: &Connection) -> CoreResult<String> {
     let value: String =
@@ -267,6 +270,7 @@ pub fn mark_cancelled(conn: &Connection, session_id: &str, conclusion: &str, div
     if affected == 0 {
         return Err(CoreError::NotFound(format!("会诊 {session_id}")));
     }
+    record_stances(conn, session_id)?;
     Ok(())
 }
 
@@ -482,7 +486,112 @@ pub fn finish_session(
     if affected == 0 {
         return Err(CoreError::NotFound(format!("会诊 {session_id}")));
     }
+    record_stances(conn, session_id)?;
     Ok(())
+}
+
+/// 立场摘要：取发言的第一句，过长时截断。纯本地推导，不调用模型。
+fn stance_summary(content: &str) -> String {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let first = trimmed
+        .split(['。', '！', '？', '\n'])
+        .next()
+        .unwrap_or(trimmed)
+        .trim();
+    let mut summary: String = first.chars().take(MAX_STANCE_CHARS).collect();
+    if first.chars().count() > MAX_STANCE_CHARS {
+        summary.push('…');
+    }
+    summary
+}
+
+/// 会诊结束时记录每个席位在自己那一题上的立场摘要。
+///
+/// 每位席位取最后一轮成功发言（收敛裁决除外）的第一句作为最新立场；
+/// 已经记录过的同一场比赛只更新内容，便于断点续跑后重跑收尾。
+pub fn record_stances(conn: &Connection, session_id: &str) -> CoreResult<()> {
+    let Some(rotation) = latest_rotation(conn, session_id)? else {
+        return Ok(());
+    };
+    let Some(panel) = panels(conn, session_id)?
+        .into_iter()
+        .find(|panel| panel.rotation == rotation)
+    else {
+        return Ok(());
+    };
+    let turns = turns(conn, session_id, Some(rotation))?;
+    let created_at = now(conn)?;
+
+    for seat in &panel.seats {
+        let latest = turns
+            .iter()
+            .filter(|turn| {
+                turn.master_id.as_deref() == Some(seat.master_id.as_str())
+                    && turn.status == "ok"
+                    && turn.role != "synthesis"
+            })
+            .max_by_key(|turn| turn.round);
+        let Some(turn) = latest else {
+            continue;
+        };
+        let summary = stance_summary(&turn.content);
+        if summary.is_empty() {
+            continue;
+        }
+        let name: Option<String> = conn
+            .query_row(
+                "SELECT name FROM masters WHERE id = ?1",
+                [&seat.master_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        conn.execute(
+            "INSERT INTO council_stances
+                 (session_id, panel_rotation, master_id, master_name, layer, summary, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT (session_id, panel_rotation, master_id) DO UPDATE SET
+                 master_name = excluded.master_name,
+                 layer = excluded.layer,
+                 summary = excluded.summary",
+            rusqlite::params![
+                session_id,
+                rotation,
+                seat.master_id,
+                name.unwrap_or_else(|| seat.master_id.clone()),
+                seat.layer.as_str(),
+                summary,
+                created_at,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// 读取某一场会诊各席位的立场摘要，按六题顺序排列。
+pub fn stances(conn: &Connection, session_id: &str, rotation: i64) -> CoreResult<Vec<StanceView>> {
+    let mut stmt = conn.prepare(
+        "SELECT master_id, master_name, layer, summary
+         FROM council_stances
+         WHERE session_id = ?1 AND panel_rotation = ?2",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![session_id, rotation], |row| {
+        let layer: String = row.get(2)?;
+        Ok(StanceView {
+            master_id: row.get(0)?,
+            master_name: row.get(1)?,
+            layer: Layer::parse(&layer).unwrap_or(Layer::Fa),
+            summary: row.get(3)?,
+        })
+    })?;
+    let mut stances = Vec::new();
+    for row in rows {
+        stances.push(row?);
+    }
+    stances.sort_by_key(|stance| stance.layer);
+    Ok(stances)
 }
 
 fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionView> {

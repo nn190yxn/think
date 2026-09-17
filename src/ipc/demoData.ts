@@ -25,6 +25,7 @@ import type {
   CouncilSessionDetail,
   CouncilSessionView,
   CouncilSourceView,
+  CouncilStanceChange,
   CouncilStrategy,
   CorpusItemView,
   CostDayView,
@@ -1067,7 +1068,51 @@ export const DEMO_HISTORY_SESSION = {
 
 /** 结论详情页六段数据。 */
 /** demo 会诊提示词版本，需与 Rust `council::orchestrator::PROMPT_VERSION` 保持一致。 */
-export const DEMO_PROMPT_VERSION = "2026-09-15.1";
+export const DEMO_PROMPT_VERSION = "2026-09-17.1";
+
+/** 每题立场与上一轮相比的变化。 */
+export const DEMO_STANCE_CHANGES: readonly CouncilStanceChange[] = [
+  {
+    layer: "dao",
+    masterId: "kazuo-inamori",
+    masterName: "稻盛和夫",
+    previousMasterName: "稻盛和夫",
+    summary: "先把现金流转正，再谈要不要离职。",
+    previousSummary: "先问这件事是否值得做，再谈怎么做。",
+    similarity: 0.18,
+    change: "shifted",
+  },
+  {
+    layer: "fa",
+    masterId: "charlie-munger",
+    masterName: "查理·芒格",
+    previousMasterName: "查理·芒格",
+    summary: "看这件事能不能用复利积累判断力。",
+    previousSummary: "看这件事能不能用复利积累判断力，别只看眼前收益。",
+    similarity: 0.72,
+    change: "same",
+  },
+  {
+    layer: "shu",
+    masterId: "steve-jobs",
+    masterName: "史蒂夫·乔布斯",
+    previousMasterName: "史蒂夫·乔布斯",
+    summary: "先做一个能拿得出手的小版本，再决定要不要全职。",
+    previousSummary: "先砍掉所有不重要的功能，只留下一个。",
+    similarity: 0.31,
+    change: "adjusted",
+  },
+  {
+    layer: "shi",
+    masterId: "sun-tzu",
+    masterName: "孙子",
+    previousMasterName: null,
+    summary: "现在是试探的时候，不是决战的时候。",
+    previousSummary: null,
+    similarity: 0,
+    change: "new",
+  },
+];
 
 export const DEMO_CONCLUSION: CouncilConclusionView = {
   session: DEMO_SESSION.session,
@@ -1075,6 +1120,7 @@ export const DEMO_CONCLUSION: CouncilConclusionView = {
   speeches: demoSeatSpeech(1),
   sources: DEMO_SOURCES,
   history: [DEMO_HISTORY_SESSION],
+  stanceChanges: DEMO_STANCE_CHANGES,
   promptVersion: DEMO_PROMPT_VERSION,
   // 6 位席位 + 1 次收敛裁决，检索次数按共享背景与席位检索的条数。
   llmCalls: 7,

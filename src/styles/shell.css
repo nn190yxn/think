@@ -4290,6 +4290,80 @@
   color: var(--ember-bright);
 }
 
+.conclusion__stances {
+  display: grid;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+
+.conclusion__stances-head {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+}
+
+.conclusion__stance-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conclusion__stance {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+}
+
+.conclusion__stance-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+}
+
+.conclusion__stance-layer {
+  font-weight: 600;
+}
+
+.conclusion__stance-change {
+  padding: 0 var(--sp-2);
+  border: var(--line-w) solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  color: var(--text-2);
+}
+
+/* 变化越大，标记越醒目；颜色之外同时有文字标签，不靠颜色单通道表达。 */
+.conclusion__stance[data-change="shifted"] .conclusion__stance-change {
+  border-color: var(--ember);
+  color: var(--ember-bright);
+}
+
+.conclusion__stance-similarity {
+  margin-left: auto;
+  color: var(--text-3);
+}
+
+.conclusion__stance-text {
+  margin: 0;
+  color: var(--text-1);
+  line-height: var(--lh-prose);
+}
+
+.conclusion__stance-previous {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+  line-height: var(--lh-prose);
+}
+
 .conclusion__empty,
 .conclusion__note {
   margin: 0;

@@ -9,9 +9,14 @@ use crate::connector::service as connector_service;
 use crate::cost;
 use crate::error::CoreResult;
 use crate::llm::platform;
+use crate::master::LAYER_ORDER;
 use crate::network::repo as network_repo;
 
-use super::{repo, speech, ConclusionView, SessionView};
+use super::{repo, scoring, speech, ConclusionView, SessionView, StanceChange};
+
+/// 立场变化的两条判定线：重合度不低于前者算延续，低于后者算转向，中间算调整。
+const STANCE_SAME_THRESHOLD: f64 = 0.6;
+const STANCE_SHIFT_THRESHOLD: f64 = 0.25;
 
 /// 组装结论详情页。
 pub fn conclusion_view(conn: &Connection, session_id: &str) -> CoreResult<ConclusionView> {
@@ -41,6 +46,7 @@ pub fn conclusion_view(conn: &Connection, session_id: &str) -> CoreResult<Conclu
         speeches: speech::seat_speech(conn, session_id, rotation)?,
         sources,
         history: history(conn, &session)?,
+        stance_changes: stance_changes(conn, &session, rotation)?,
         prompt_version,
         llm_calls,
         search_calls,
@@ -73,6 +79,108 @@ fn history(conn: &Connection, session: &SessionView) -> CoreResult<Vec<SessionVi
         }
     }
     Ok(history)
+}
+
+/// 每题立场与上一次同主题会诊相比的变化。
+///
+/// 没有本场立场记录（升级前的会话）或找不到上一次同主题会诊时返回空表，
+/// 界面据此隐藏这一段。
+fn stance_changes(
+    conn: &Connection,
+    session: &SessionView,
+    rotation: i64,
+) -> CoreResult<Vec<StanceChange>> {
+    let current = repo::stances(conn, &session.id, rotation)?;
+    if current.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(previous_session_id) = previous_same_topic(conn, session)? else {
+        return Ok(Vec::new());
+    };
+    let previous_rotation = repo::latest_rotation(conn, &previous_session_id)?.unwrap_or(0);
+    let previous = repo::stances(conn, &previous_session_id, previous_rotation)?;
+    if previous.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut changes = Vec::new();
+    for layer in LAYER_ORDER {
+        let now = current.iter().find(|stance| stance.layer == layer);
+        let before = previous.iter().find(|stance| stance.layer == layer);
+        match (now, before) {
+            (Some(now), Some(before)) => {
+                let similarity = scoring::overlap(
+                    &scoring::tokens(&now.summary),
+                    &scoring::tokens(&before.summary),
+                );
+                changes.push(StanceChange {
+                    layer,
+                    master_id: now.master_id.clone(),
+                    master_name: now.master_name.clone(),
+                    previous_master_name: Some(before.master_name.clone()),
+                    summary: now.summary.clone(),
+                    previous_summary: Some(before.summary.clone()),
+                    similarity,
+                    change: stance_change_code(similarity).to_string(),
+                });
+            }
+            (Some(now), None) => changes.push(StanceChange {
+                layer,
+                master_id: now.master_id.clone(),
+                master_name: now.master_name.clone(),
+                previous_master_name: None,
+                summary: now.summary.clone(),
+                previous_summary: None,
+                similarity: 0.0,
+                change: "new".to_string(),
+            }),
+            (None, Some(before)) => changes.push(StanceChange {
+                layer,
+                master_id: before.master_id.clone(),
+                master_name: before.master_name.clone(),
+                previous_master_name: Some(before.master_name.clone()),
+                summary: String::new(),
+                previous_summary: Some(before.summary.clone()),
+                similarity: 0.0,
+                change: "dropped".to_string(),
+            }),
+            (None, None) => {}
+        }
+    }
+    Ok(changes)
+}
+
+fn stance_change_code(similarity: f64) -> &'static str {
+    if similarity >= STANCE_SAME_THRESHOLD {
+        "same"
+    } else if similarity >= STANCE_SHIFT_THRESHOLD {
+        "adjusted"
+    } else {
+        "shifted"
+    }
+}
+
+/// 上一次同主题会诊：按写入顺序往前找，取题面归一化后一致的第一场。
+fn previous_same_topic(conn: &Connection, session: &SessionView) -> CoreResult<Option<String>> {
+    let topic = network_repo::normalize(&session.question);
+    if topic.is_empty() {
+        return Ok(None);
+    }
+    let mut stmt = conn.prepare(
+        "SELECT id, question FROM council_sessions
+         WHERE id != ?1 AND rowid < (SELECT rowid FROM council_sessions WHERE id = ?1)
+         ORDER BY rowid DESC LIMIT 50",
+    )?;
+    let rows = stmt.query_map([&session.id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (id, question) = row?;
+        if network_repo::normalize(&question) == topic {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
 }
 
 /// 迁移尚未执行到连接器版本时，界面按「未启用外部检索」呈现空态。

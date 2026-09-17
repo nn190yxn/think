@@ -576,12 +576,14 @@ pub fn council_select(
         let previous = council_repo::latest_panel(&conn, &session_id)?
             .map(|panel| panel.seats)
             .unwrap_or_default();
+        let diverged = diverged_layers(&session);
         let request = select::SelectionRequest {
             strategy: parsed,
             size,
             pinned: &pinned,
             exclude: &exclude,
             previous: &previous,
+            diverged: &diverged,
         };
         let selection = select_selection(&conn, &session.question, &request)?;
         let rotation = council_repo::latest_rotation(&conn, &session_id)?.unwrap_or(-1) + 1;
@@ -632,12 +634,14 @@ pub fn council_rotate(
             size.unwrap_or(thought_forge_core::council::DEFAULT_PANEL_SIZE),
             session.self_seat_included,
         )?;
+        let diverged = diverged_layers(&session);
         let request = select::SelectionRequest {
             strategy: parsed,
             size,
             pinned: &pinned,
             exclude: &exclude,
             previous: previous.as_ref().map(|panel| panel.seats.as_slice()).unwrap_or(&[]),
+            diverged: &diverged,
         };
         let selection = select_selection(&conn, &session.question, &request)?;
         let rotation = council_repo::latest_rotation(&conn, &session_id)?.unwrap_or(-1) + 1;
@@ -645,6 +649,14 @@ pub fn council_rotate(
         Ok(selection)
     })();
     result.into()
+}
+
+/// 上一轮没能谈拢的题，按题序去重，供换批时优先补人。
+fn diverged_layers(session: &SessionView) -> Vec<Layer> {
+    let mut layers: Vec<Layer> = session.divergences.iter().map(|item| item.layer).collect();
+    layers.sort();
+    layers.dedup();
+    layers
 }
 
 fn select_selection(

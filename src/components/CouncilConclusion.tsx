@@ -1,11 +1,12 @@
 import { DivergenceCurve } from "./DivergenceCurve";
 import { SeatSpeech } from "./SeatSpeech";
 import { LayerGlyph } from "./LayerGlyph";
-import { formatMoney, formatTime } from "../domain/labels";
+import { formatMoney, formatTime, stanceChangeLabel } from "../domain/labels";
 import { LAYER_KEYS, layerOf } from "../domain/layers";
 import type {
   CouncilConclusionView,
   CouncilSourceView,
+  CouncilStanceChange,
   DivergenceView,
   FollowUpAnchor,
 } from "../ipc/commands";
@@ -63,6 +64,62 @@ function sourcesBlock(sources: readonly CouncilSourceView[]) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** 立场变化：每题一条，说明这一轮和上一轮相比是延续、调整还是转向。 */
+function stanceChangesBlock(changes: readonly CouncilStanceChange[]) {
+  return (
+    <div className="conclusion__stances">
+      <h4 className="conclusion__stances-head">每题与上一轮相比</h4>
+      <ul className="conclusion__stance-list">
+        {changes.map((item) => {
+          const meta = layerOf(item.layer);
+          const compared =
+            item.change !== "new" && item.change !== "dropped";
+          return (
+            <li
+              key={item.layer}
+              className="conclusion__stance"
+              data-change={item.change}
+            >
+              <div className="conclusion__stance-head">
+                <span aria-hidden="true">
+                  <LayerGlyph glyph={meta.glyph} size={12} />
+                </span>
+                <span className="conclusion__stance-layer">
+                  {meta.name} · {meta.question}
+                </span>
+                <span className="conclusion__stance-change">
+                  {stanceChangeLabel(item.change)}
+                </span>
+                {compared ? (
+                  <span className="conclusion__stance-similarity">
+                    用词重合 {Math.round(item.similarity * 100)}%
+                  </span>
+                ) : null}
+              </div>
+              {item.summary ? (
+                <p className="conclusion__stance-text">{item.summary}</p>
+              ) : (
+                <p className="conclusion__stance-text conclusion__empty">
+                  这一轮没有人站上这一题。
+                </p>
+              )}
+              {item.previousSummary ? (
+                <p className="conclusion__stance-previous">
+                  上一轮
+                  {item.previousMasterName
+                    ? `（${item.previousMasterName}）`
+                    : ""}
+                  ：{item.previousSummary}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -232,6 +289,7 @@ export function CouncilConclusion({
 
       <section className="conclusion__section">
         <h3 className="section-head">六 · 前后几次结论</h3>
+        {view.stanceChanges.length > 0 ? stanceChangesBlock(view.stanceChanges) : null}
         {view.history.length === 0 ? (
           <p className="conclusion__empty">同一主题下还没有更早的结论。</p>
         ) : (

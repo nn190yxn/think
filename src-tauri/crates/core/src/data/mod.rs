@@ -24,6 +24,7 @@ pub const DATA_TABLES: &[(&str, &str)] = &[
     ("masters", "大师"),
     ("council_turns", "会诊发言"),
     ("council_round_metrics", "会诊轮次指标"),
+    ("council_stances", "会诊立场摘要"),
     ("council_sources", "检索快照"),
     ("council_panels", "会诊阵容"),
     ("council_sessions", "会诊会话"),

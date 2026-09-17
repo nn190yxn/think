@@ -648,6 +648,7 @@ export const stubTransport: CommandTransport = {
           speeches: [],
           sources: [],
           history: [DEMO_SESSION.session],
+          stanceChanges: [],
           promptVersion: DEMO_PROMPT_VERSION,
           llmCalls: 0,
           searchCalls: 0,

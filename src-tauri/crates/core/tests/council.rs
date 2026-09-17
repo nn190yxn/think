@@ -4,8 +4,8 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 
 use thought_forge_core::council::{
-    orchestrator, pairings, pool, repo, scoring, select, speech, CandidatePool, DivergenceView,
-    SeatRef, Strategy,
+    conclusion, orchestrator, pairings, pool, repo, scoring, select, speech, CandidatePool,
+    DivergenceView, SeatRef, Strategy,
 };
 use thought_forge_core::connector::{service::Retrieval, SearchHit, SearchProvider};
 use thought_forge_core::db::{self, migrations};
@@ -335,6 +335,7 @@ fn rotation_does_not_add_gap_questions() {
             pinned: &[],
             exclude: &current,
             previous: &previous,
+            diverged: &[],
         },
     )
     .expect("换批选角");
@@ -351,6 +352,39 @@ fn rotation_does_not_add_gap_questions() {
         rotated.gaps.is_empty(),
         "池里每题都有两位以上候选后不应再有缺口题"
     );
+}
+
+#[test]
+fn an_unsettled_question_counts_as_a_gap_even_with_a_seat() {
+    let mut conn = seeded_db();
+    let _extra = install_extra_masters(&mut conn, 12);
+    let pool = build_pool(&conn);
+
+    // 池里每题都有两位以上候选，正常情况下没有缺口题。
+    let plain = select::select_panel(
+        &conn,
+        &pool,
+        &select::SelectionRequest::new(Strategy::Steady),
+    )
+    .expect("可完成选角");
+    assert!(plain.gaps.is_empty(), "候选充足时不应有缺口题");
+
+    // 上一轮在「器」这一题上没谈拢，即使有人站上，也仍应记为缺口。
+    let diverged = [Layer::Tool];
+    let plan = select::select_panel(
+        &conn,
+        &pool,
+        &select::SelectionRequest {
+            strategy: Strategy::Steady,
+            size: 6,
+            pinned: &[],
+            exclude: &[],
+            previous: &[],
+            diverged: &diverged,
+        },
+    )
+    .expect("可完成选角");
+    assert_eq!(plan.gaps, vec![Layer::Tool], "没谈拢的题应记为缺口");
 }
 
 #[test]
@@ -376,6 +410,7 @@ fn rotation_prefers_a_different_voice_on_the_same_question() {
             pinned: &[],
             exclude: &[],
             previous: &previous,
+            diverged: &[],
         },
     )
     .expect("可完成换批");
@@ -389,6 +424,111 @@ fn rotation_prefers_a_different_voice_on_the_same_question() {
         fa.master_id, "different",
         "同一题应优先换入与上一任立场不同的人"
     );
+}
+
+#[test]
+fn every_seat_records_a_stance_on_its_own_question() {
+    let conn = seeded_db();
+    let client = ScriptedClient::new();
+    let session = run_session(&conn, &client, Strategy::Steady);
+
+    let rotation = repo::latest_rotation(&conn, &session)
+        .expect("可读轮次")
+        .expect("应有阵容");
+    let panel = repo::latest_panel(&conn, &session)
+        .expect("可读阵容")
+        .expect("应有阵容");
+    let stances = repo::stances(&conn, &session, rotation).expect("可读立场");
+
+    assert_eq!(stances.len(), panel.seats.len(), "每个席位都应留下立场");
+    for seat in &panel.seats {
+        let stance = stances
+            .iter()
+            .find(|stance| stance.master_id == seat.master_id)
+            .expect("席位应有立场");
+        assert_eq!(stance.layer, seat.layer, "立场应记在席位被指派的题上");
+        assert!(!stance.summary.trim().is_empty(), "立场摘要不能为空");
+        assert!(!stance.master_name.trim().is_empty(), "立场应带大师名字");
+    }
+    // 摘要按六题顺序排列，便于逐题对比。
+    let layers: Vec<Layer> = stances.iter().map(|stance| stance.layer).collect();
+    let mut sorted = layers.clone();
+    sorted.sort();
+    assert_eq!(layers, sorted, "立场应按题排序");
+}
+
+#[test]
+fn stance_summary_keeps_the_last_rounds_first_sentence() {
+    let conn = seeded_db();
+    let pool = build_pool(&conn);
+    let session = repo::create_session(&conn, question(), &pool.domains, &[], Strategy::Steady)
+        .expect("可新建会话");
+    let plan = select::select_panel(&conn, &pool, &select::SelectionRequest::new(Strategy::Steady))
+        .expect("可完成选角");
+    repo::record_panel(&conn, &session, 0, &plan, &[]).expect("可记录阵容");
+    let master_id = plan.seats[0].master_id.clone();
+    for (round, content) in [
+        (1, "先看动机与边界，这一步先不谈时机。"),
+        (2, "先算代价与胜负，再决定要不要动手。"),
+    ] {
+        repo::save_turn(
+            &conn,
+            &repo::NewTurn {
+                session_id: session.clone(),
+                round,
+                panel_rotation: 0,
+                role: "answer".to_string(),
+                master_id: Some(master_id.clone()),
+                master_version: Some(1),
+                content: content.to_string(),
+                citations: Vec::new(),
+                prompt_version: "test".to_string(),
+                status: "ok".to_string(),
+                error_code: None,
+            },
+        )
+        .expect("可写入发言");
+    }
+    repo::finish_session(&conn, &session, "先小规模验证。", &[]).expect("可收敛");
+
+    let stances = repo::stances(&conn, &session, 0).expect("可读立场");
+    assert_eq!(stances.len(), 1, "只有一位席位有发言");
+    assert_eq!(
+        stances[0].summary, "先算代价与胜负，再决定要不要动手",
+        "应取最后一轮发言的第一句，不带句号后的内容"
+    );
+}
+
+#[test]
+fn same_topic_second_council_reports_per_question_stance_changes() {
+    let conn = seeded_db();
+    let client = ScriptedClient::new();
+    let first = run_session(&conn, &client, Strategy::Steady);
+    let before = conclusion::conclusion_view(&conn, &first).expect("可组装结论");
+    assert!(
+        before.stance_changes.is_empty(),
+        "第一次会诊没有可比的上一次"
+    );
+
+    let second = run_session(&conn, &client, Strategy::Steady);
+    let view = conclusion::conclusion_view(&conn, &second).expect("可组装结论");
+    assert_eq!(
+        view.stance_changes.len(),
+        6,
+        "六题都有席位发言，都应给出一条对比"
+    );
+    for change in &view.stance_changes {
+        assert!(
+            change.change != "new" && change.change != "dropped",
+            "两次都在同一题有人发言，不应判为新谈或停谈：{change:?}"
+        );
+        assert!(
+            (0.0..=1.0).contains(&change.similarity),
+            "重合度应落在 0 到 1 之间"
+        );
+        assert!(change.previous_summary.is_some(), "应带上上一轮立场");
+        assert!(change.previous_master_name.is_some(), "应说明上一轮是谁");
+    }
 }
 
 #[test]
@@ -611,6 +751,7 @@ fn pinned_seat_survives_rotation_and_rotation_keeps_coverage() {
             pinned: &pinned,
             exclude: &[],
             previous: &[],
+            diverged: &[],
         },
     )
     .expect("首次选角");
@@ -626,6 +767,7 @@ fn pinned_seat_survives_rotation_and_rotation_keeps_coverage() {
             pinned: &pinned,
             exclude: &current,
             previous: &[],
+            diverged: &[],
         },
     )
     .expect("换批选角");
@@ -762,6 +904,7 @@ fn rotation_adds_a_second_panel_without_losing_history() {
             pinned: &pinned,
             exclude: &[],
             previous: &[],
+            diverged: &[],
         },
     )
     .unwrap();
@@ -785,6 +928,7 @@ fn rotation_adds_a_second_panel_without_losing_history() {
             pinned: &pinned,
             exclude: &first.master_ids(),
             previous: &previous,
+            diverged: &[],
         },
     )
     .unwrap();

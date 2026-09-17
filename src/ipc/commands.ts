@@ -257,6 +257,30 @@ export interface DivergenceView {
   readonly text: string;
 }
 
+/** 一个席位在自己那一题上的立场摘要。 */
+export interface CouncilStance {
+  readonly masterId: string;
+  readonly masterName: string;
+  readonly layer: LayerKey;
+  readonly summary: string;
+}
+
+/** 同一题与上一次同主题会诊相比的立场变化。 */
+export interface CouncilStanceChange {
+  readonly layer: LayerKey;
+  readonly masterId: string;
+  readonly masterName: string;
+  readonly previousMasterName: string | null;
+  /** 本轮立场摘要；停谈时为空。 */
+  readonly summary: string;
+  /** 上一轮立场摘要；新谈时为空。 */
+  readonly previousSummary: string | null;
+  /** 两轮摘要的用词重合度，0 到 1。 */
+  readonly similarity: number;
+  /** same 延续、adjusted 调整、shifted 转向、new 新谈、dropped 停谈。 */
+  readonly change: string;
+}
+
 export interface CouncilSessionView {
   readonly id: string;
   readonly question: string;
@@ -346,6 +370,8 @@ export interface CouncilConclusionView {
   readonly speeches: readonly CouncilSeatSpeech[];
   readonly sources: readonly CouncilSourceView[];
   readonly history: readonly CouncilSessionView[];
+  /** 每题立场与上一次同主题会诊相比的变化；没有可比记录时为空。 */
+  readonly stanceChanges: readonly CouncilStanceChange[];
   /** 生成该结论所用的提示词模板版本，空串表示未记录。 */
   readonly promptVersion: string;
   /** 本场会诊已记录的模型调用次数。 */

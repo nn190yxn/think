@@ -140,6 +140,26 @@ describe("圆桌会诊", () => {
     expect(table).toHaveTextContent("气 · 靠什么心力度过");
   });
 
+  it("每题立场与上一轮相比的变化带题标注与变化说明", async () => {
+    await runCouncil();
+    await userEvent.click(await screen.findByRole("button", { name: "查看结论详情" }));
+
+    const block = (await screen.findByText("每题与上一轮相比")).closest(
+      ".conclusion__stances",
+    ) as HTMLElement;
+    const items = Array.from(block.querySelectorAll(".conclusion__stance"));
+    expect(items).toHaveLength(4);
+    expect(items[0]).toHaveTextContent("道 · 什么值得做");
+    expect(items[0]).toHaveTextContent("转向");
+    expect(items[0]).toHaveTextContent("上一轮");
+    expect(items[3]).toHaveTextContent("势 · 现在是不是时候");
+    expect(items[3]).toHaveTextContent("新谈");
+    // 颜色之外必须有文字标签，不靠颜色单通道表达变化。
+    for (const item of items) {
+      expect(item.querySelector(".conclusion__stance-change")?.textContent).toBeTruthy();
+    }
+  });
+
   it("可从结论发起追问并返回母会话", async () => {
     await runCouncil();
     await userEvent.click(await screen.findByRole("button", { name: "查看结论详情" }));
@@ -204,7 +224,7 @@ describe("圆桌会诊", () => {
     await userEvent.click(await screen.findByRole("button", { name: "查看结论详情" }));
 
     expect(await screen.findByText("可疑指令，仅作资料")).toBeInTheDocument();
-    expect(screen.getByText(/提问模板 2026-09-15\.1/)).toBeInTheDocument();
+    expect(screen.getByText(/提问模板 2026-09-17\.1/)).toBeInTheDocument();
   });
 
   it("启动时提示未完成的会诊并可继续", async () => {

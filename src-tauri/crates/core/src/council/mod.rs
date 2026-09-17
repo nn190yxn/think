@@ -160,6 +160,35 @@ pub struct DivergenceView {
     pub text: String,
 }
 
+/// 一个席位在自己那一题上的立场摘要，取自该席位最后一轮成功发言的开头。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StanceView {
+    pub master_id: String,
+    pub master_name: String,
+    pub layer: Layer,
+    pub summary: String,
+}
+
+/// 同一题与上一次同主题会诊相比的立场变化。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StanceChange {
+    pub layer: Layer,
+    pub master_id: String,
+    pub master_name: String,
+    /// 上一轮在这一题上发言的人；本轮新谈或停谈时为空。
+    pub previous_master_name: Option<String>,
+    /// 本轮立场摘要；停谈时为空。
+    pub summary: String,
+    /// 上一轮立场摘要；新谈时为空。
+    pub previous_summary: Option<String>,
+    /// 两轮摘要的用词重合度，0 到 1；只在一方缺席时为 0。
+    pub similarity: f64,
+    /// same 延续、adjusted 调整、shifted 转向、new 新谈、dropped 停谈。
+    pub change: String,
+}
+
 /// 会诊阵容的一次轮次。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -372,6 +401,8 @@ pub struct ConclusionView {
     pub prompt_version: String,
     /// 同一主题的其它会诊，按时间倒序。
     pub history: Vec<SessionView>,
+    /// 每题立场与上一次同主题会诊相比的变化；没有可比记录时为空。
+    pub stance_changes: Vec<StanceChange>,
     /// 本场会诊已记录的模型调用次数。
     pub llm_calls: i64,
     /// 本场会诊已记录的检索调用次数。

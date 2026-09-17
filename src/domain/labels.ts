@@ -179,6 +179,19 @@ export function divergenceModeLabel(mode: string): string {
   return DIVERGENCE_MODE_LABEL[mode] ?? mode;
 }
 
+/** 立场相对上一次同主题会诊的变化。 */
+const STANCE_CHANGE_LABEL: Record<string, string> = {
+  same: "延续",
+  adjusted: "调整",
+  shifted: "转向",
+  new: "新谈",
+  dropped: "停谈",
+};
+
+export function stanceChangeLabel(change: string): string {
+  return STANCE_CHANGE_LABEL[change] ?? change;
+}
+
 /** 主动搜集命中的来源类型。 */
 const DISCOVERY_SOURCE_LABEL: Record<string, string> = {
   rss: "订阅源",

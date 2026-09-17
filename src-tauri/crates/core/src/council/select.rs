@@ -27,6 +27,8 @@ pub struct SelectionRequest<'a> {
     pub exclude: &'a [String],
     /// 上一轮阵容的席位指派。换批时用它知道每一题上一任是谁，优先换入立场不同的人。
     pub previous: &'a [SeatRef],
+    /// 上一轮没能谈拢的题。这些题即使有人站上也仍记为缺口，换批时优先换人再谈。
+    pub diverged: &'a [Layer],
 }
 
 impl<'a> SelectionRequest<'a> {
@@ -37,6 +39,7 @@ impl<'a> SelectionRequest<'a> {
             pinned: &[],
             exclude: &[],
             previous: &[],
+            diverged: &[],
         }
     }
 }
@@ -282,13 +285,14 @@ pub fn select_panel(
 
     let layers: Vec<Layer> = covered.iter().copied().collect();
 
-    // 缺口题：没有席位站上去的题，以及全池里能站上这一题的人不足两位、
-    // 注定无法形成同题对立的题。
+    // 缺口题：没有席位站上去的题、全池里能站上这一题的人不足两位而注定
+    // 无法形成同题对立的题，以及上一轮在这一题上没能谈拢的题。
     let gaps: Vec<Layer> = LAYER_ORDER
         .iter()
         .copied()
         .filter(|layer| {
             !layers.contains(layer)
+                || request.diverged.contains(layer)
                 || pool
                     .candidates
                     .iter()

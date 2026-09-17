@@ -125,6 +125,13 @@ describe("预览数据集", () => {
     expect(DEMO_CONCLUSION.speeches.length).toBe(6);
     expect(DEMO_CONCLUSION.sources.length).toBeGreaterThan(0);
     expect(DEMO_CONCLUSION.history.length).toBeGreaterThan(0);
+    expect(DEMO_CONCLUSION.stanceChanges.length).toBeGreaterThan(0);
+    for (const item of DEMO_CONCLUSION.stanceChanges) {
+      expect(item.change.length).toBeGreaterThan(0);
+      if (item.change === "new" || item.change === "dropped") {
+        expect(item.similarity).toBe(0);
+      }
+    }
   });
 
   it("连接器配置的类型、状态与启用条件一致", () => {
