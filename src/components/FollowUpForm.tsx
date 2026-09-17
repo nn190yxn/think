@@ -1,15 +1,9 @@
 import { useState } from "react";
 import type { FollowUpAnchor } from "../ipc/commands";
-
-const KIND_LABEL: Record<string, string> = {
-  conclusion: "结论",
-  answer: "作答",
-  critique: "质询",
-  divergence: "分歧",
-};
+import { anchorKindLabel } from "../domain/labels";
 
 /**
- * 追问入口：围绕一段既有判断写一个新问题，可选择是否继承母会话阵容。
+ * 追问入口：围绕一段既有判断写一个新问题，可选择是否沿用上一场的大师阵容。
  */
 export function FollowUpForm({
   anchor,
@@ -42,7 +36,7 @@ export function FollowUpForm({
       }}
     >
       <p className="followup__anchor">
-        <span className="followup__kind">{KIND_LABEL[anchor.kind] ?? anchor.kind}</span>
+        <span className="followup__kind">{anchorKindLabel(anchor.kind)}</span>
         <span className="followup__text">{anchor.text}</span>
       </p>
       <label className="followup__label" htmlFor="followup-question">
@@ -62,7 +56,7 @@ export function FollowUpForm({
           checked={inheritPanel}
           onChange={(event) => setInheritPanel(event.target.checked)}
         />
-        沿用母会话阵容，保持推理依据一致
+        沿用上一场的大师阵容，保持判断依据一致
       </label>
       {error ? (
         <p className="followup__note" data-tone="warn">
@@ -71,7 +65,7 @@ export function FollowUpForm({
       ) : null}
       <div className="followup__actions">
         <button className="followup__submit" type="submit" disabled={busy}>
-          {busy ? "正在建会话" : "发起追问"}
+          {busy ? "正在准备" : "发起追问"}
         </button>
         <button className="followup__cancel" type="button" onClick={onCancel}>
           取消

@@ -28,7 +28,7 @@ const REALM_KEYWORDS: Record<RealmKey, readonly string[]> = {
   council: ["会诊", "圆桌", "council"],
   refine: ["炼", "蒸馏", "refine"],
   vault: ["藏", "大师", "资产", "知识", "vault"],
-  self: ["我", "成长", "设置", "铜镜", "self"],
+  self: ["我", "成长", "设置", "自我画像", "self"],
 };
 
 /**
@@ -197,14 +197,16 @@ export function CommandPalette({
           aria-controls="palette-list"
           aria-autocomplete="list"
           aria-activedescendant={actions[active] ? `palette-${actions[active]!.id}` : undefined}
-          placeholder="输入自然语言或 / 结构化指令"
+          placeholder="直接说你想做什么，或输入 / 看可选动作"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onKeyDown}
         />
         <ul className="palette__list" id="palette-list" role="listbox" aria-label="候选命令">
           {actions.length === 0 ? (
-            <li className="palette__empty">没有匹配的命令，试试「会诊」「主题」或 /go</li>
+            <li className="palette__empty">
+              没有匹配的项，试试「会诊」「主题」，或者直接写一句话发起会诊
+            </li>
           ) : (
             actions.map((action, index) => (
               <li

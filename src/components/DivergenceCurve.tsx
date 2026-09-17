@@ -1,4 +1,5 @@
 import type { CouncilRoundMetric } from "../ipc/commands";
+import { divergenceModeLabel } from "../domain/labels";
 
 const VIEW_W = 360;
 const VIEW_H = 128;
@@ -6,18 +7,9 @@ const PAD_X = 34;
 const PAD_TOP = 14;
 const PAD_BOTTOM = 30;
 
-/** 判定方式的中文标注；回退由调用处补一个后缀。 */
-function methodLabel(method: string): string {
-  return method === "hybrid"
-    ? "混合判定"
-    : method === "polarity"
-      ? "极性判定"
-      : "词面判定";
-}
-
 /** 判定方式与回退标记合成一段可读文字。 */
 function methodNote(metric: CouncilRoundMetric): string {
-  return `${methodLabel(metric.method)}${metric.fellBack ? "（回退）" : ""}`;
+  return `${divergenceModeLabel(metric.method)}${metric.fellBack ? "（回退）" : ""}`;
 }
 
 /** 分歧度映射到图内坐标；1 在顶，0 在底。 */
@@ -45,7 +37,7 @@ export function DivergenceCurve({
   if (rounds.length === 0) {
     return (
       <p className="council__note" data-tone="muted">
-        本次会诊没有留下质询轮指标。
+        这次没有留下可供对比的轮次数据。
       </p>
     );
   }
@@ -65,7 +57,7 @@ export function DivergenceCurve({
         className="divergence__chart"
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         role="img"
-        aria-label={`分歧曲线，从第 ${first.round} 轮到第 ${last.round} 轮，当前分歧度 ${last.divergence.toFixed(2)}`}
+        aria-label={`分歧变化图，从第 ${first.round} 轮到第 ${last.round} 轮，当前分歧程度 ${last.divergence.toFixed(2)}`}
       >
         {[0, 0.5, 1].map((tick) => {
           const { y } = pointOf(0, rounds.length, tick);
@@ -99,7 +91,7 @@ export function DivergenceCurve({
               y={thresholdPoint - 4}
               textAnchor="end"
             >
-              收敛阈值 {threshold?.toFixed(2)}
+              收敛线 {threshold?.toFixed(2)}
             </text>
           </>
         ) : null}
@@ -116,7 +108,7 @@ export function DivergenceCurve({
               r={4}
             >
               <title>
-                第 {metric.round} 轮 · 分歧 {metric.divergence.toFixed(2)} ·{" "}
+                第 {metric.round} 轮 · 分歧程度 {metric.divergence.toFixed(2)} ·{" "}
                 {methodNote(metric)}
               </title>
             </circle>
@@ -139,25 +131,25 @@ export function DivergenceCurve({
       </svg>
       <p className="divergence__caption">
         {rounds.length === 1
-          ? "只有一轮质询，曲线仅一个观测点，无法看出走势。"
-          : `分歧度由 ${first.divergence.toFixed(2)} 走到 ${last.divergence.toFixed(2)}，${last.converged ? "已收敛" : "仍未收敛"}。`}
+          ? "只有一轮，图上只有一个点，还看不出走势。"
+          : `分歧程度从 ${first.divergence.toFixed(2)} 变到 ${last.divergence.toFixed(2)}，${last.converged ? "已经收敛" : "还没收敛"}。`}
         {rounds.some((metric) => metric.fellBack)
           ? ` 第 ${rounds
               .filter((metric) => metric.fellBack)
               .map((metric) => metric.round)
-              .join("、")} 轮为词面判定，极性判定当时不可用。`
+              .join("、")} 轮只能按用词判断，当时无法判断观点方向。`
           : ""}
       </p>
       <details className="divergence__table">
         <summary>逐轮数据表</summary>
         <table>
-          <caption>各质询轮的相似度与分歧度</caption>
+          <caption>每一轮的相似程度与分歧程度</caption>
           <thead>
             <tr>
               <th scope="col">轮次</th>
-              <th scope="col">参与席位</th>
-              <th scope="col">平均相似度</th>
-              <th scope="col">分歧度</th>
+              <th scope="col">参与人数</th>
+              <th scope="col">平均相似程度</th>
+              <th scope="col">分歧程度</th>
               <th scope="col">判定方式</th>
               <th scope="col">是否收敛</th>
             </tr>

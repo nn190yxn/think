@@ -29,7 +29,27 @@ function renderRealm() {
   );
 }
 
+/** 系统视图放着外观、联网、成本等低频设置，进入前先切到「系统」页。 */
+async function showSystem() {
+  await userEvent.click(await screen.findByRole("tab", { name: "系统" }));
+}
+
 describe("我境界 · 成长轨迹", () => {
+  it("成长与系统分两页，系统设置只在系统页可达", async () => {
+    renderRealm();
+    expect(screen.getByRole("tab", { name: "成长" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // 成长页看不到低频的系统设置。
+    expect(await screen.findByRole("switch", { name: "主动助学" })).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "联网能力" })).toBeNull();
+
+    await showSystem();
+    expect(await screen.findByRole("switch", { name: "联网能力" })).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "主动助学" })).toBeNull();
+  });
+
   it("列出思考记录与演化链，采纳状态可见", async () => {
     renderRealm();
     expect(await screen.findByText("成长轨迹")).toBeInTheDocument();
@@ -49,13 +69,16 @@ describe("我境界 · 成长轨迹", () => {
     renderRealm();
     expect(await screen.findByText("记忆固化")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "立即固化" }));
-    await waitFor(() => expect(screen.getByText("强化连线")).toBeInTheDocument());
-    expect(screen.getByText("识别冲突")).toBeInTheDocument();
-    expect(screen.getAllByText("manual").length).toBeGreaterThan(0);
+    await waitFor(() =>
+      expect(screen.getByText("加深了的连接")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("发现的矛盾")).toBeInTheDocument();
+    expect(screen.getAllByText("手动触发").length).toBeGreaterThan(0);
   });
 
   it("调参面板按组展示范围，越界提示且整批不生效", async () => {
     renderRealm();
+    await showSystem();
     expect(await screen.findByText("调参")).toBeInTheDocument();
     const input = await screen.findByLabelText("质询轮次上限");
     expect(input).toHaveValue("3");
@@ -108,7 +131,7 @@ describe("我境界 · 成长轨迹", () => {
   it("采集台可暂停、恢复并删除记录，系统不可用的能力被禁用", async () => {
     renderRealm();
     expect(await screen.findByText("采集台")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "脱敏" })).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: "遮蔽敏感信息" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -172,13 +195,13 @@ describe("我境界 · 成长轨迹", () => {
     expect(screen.getByText("已清空关注目录")).toBeInTheDocument();
   });
 
-  it("铜镜展示解锁进度，逐条确认后可安装为会诊席位", async () => {
+  it("自我画像展示解锁进度，逐条确认后可安装为会诊席位", async () => {
     renderRealm();
-    expect(await screen.findByText("铜镜 · 自我蒸馏")).toBeInTheDocument();
+    expect(await screen.findByText("自我画像")).toBeInTheDocument();
     expect(screen.getByText("24 / 20")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "安装并加入会诊" })).toBeDisabled();
 
-    const list = await screen.findByRole("list", { name: "自我蒸馏初稿" });
+    const list = await screen.findByRole("list", { name: "自我画像初稿" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(5);
 
     await userEvent.click(
@@ -200,25 +223,25 @@ describe("我境界 · 成长轨迹", () => {
     );
 
     await userEvent.click(screen.getByRole("button", { name: "安装并加入会诊" }));
-    const seat = await screen.findByRole("switch", { name: "自我席位" });
+    const seat = await screen.findByRole("switch", { name: "把你自己加入会诊" });
     expect(seat).toHaveAttribute("aria-checked", "true");
 
     await userEvent.click(seat);
     await waitFor(() =>
-      expect(screen.getByRole("switch", { name: "自我席位" })).toHaveAttribute(
-        "aria-checked",
-        "false",
-      ),
+      expect(
+        screen.getByRole("switch", { name: "把你自己加入会诊" }),
+      ).toHaveAttribute("aria-checked", "false"),
     );
   });
 
   it("数据主权展示范围，导出只读、清除需二次确认并留痕", async () => {
     renderRealm();
+    await showSystem();
     expect(await screen.findByText("数据主权")).toBeInTheDocument();
-    expect(screen.getByText("10 张表 · 1482 行")).toBeInTheDocument();
+    expect(screen.getByText("共 1482 条记录")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "导出为 JSON" }));
-    expect(await screen.findByText(/已导出 1482 行到/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "导出数据文件" }));
+    expect((await screen.findAllByText(/已导出 1482 条记录/)).length).toBeGreaterThan(0);
     // 导出是只读操作，不触发清除。
     expect(dataPurgeButton()).toHaveAttribute("aria-pressed", "false");
 
@@ -227,12 +250,13 @@ describe("我境界 · 成长轨迹", () => {
       expect(dataPurgeButton()).toHaveAttribute("aria-pressed", "true"),
     );
     await userEvent.click(screen.getByRole("button", { name: "确认清除，不可撤销" }));
-    expect(await screen.findByText(/已清除 1482 行/)).toBeInTheDocument();
+    expect(await screen.findByText(/已清除 1482 条记录/)).toBeInTheDocument();
   });
 
-  it("连接器面板可开关、测试连通并展示调用审计", async () => {
+  it("外部数据源面板可开关、测试连接并展示调用记录", async () => {
     renderRealm();
-    const heading = await screen.findByRole("heading", { name: "连接器" });
+    await showSystem();
+    const heading = await screen.findByRole("heading", { name: "外部数据源" });
     const panel = heading.closest(".panel") as HTMLElement;
     expect(within(panel).getAllByRole("switch")).toHaveLength(3);
 
@@ -246,19 +270,22 @@ describe("我境界 · 成长轨迹", () => {
     );
 
     await userEvent.click(
-      within(panel).getAllByRole("button", { name: "连通测试" })[0]!,
+      within(panel).getAllByRole("button", { name: "测试连接" })[0]!,
     );
     const preflight = await screen.findByRole("group", { name: "发送前确认" });
     expect(within(preflight).getByText("实际发送")).toBeInTheDocument();
     await userEvent.click(within(preflight).getByRole("button", { name: "确认发送" }));
 
-    expect(await screen.findByText(/连通测试(通过|失败)/)).toBeInTheDocument();
-    expect(within(panel).getAllByText("共享背景检索").length).toBeGreaterThan(0);
-    expect(within(panel).getByText("席位补充检索")).toBeInTheDocument();
+    expect(await screen.findByText(/已连上|没能连上/)).toBeInTheDocument();
+    expect(
+      within(panel).getAllByText("会诊前搜集共享背景").length,
+    ).toBeGreaterThan(0);
+    expect(within(panel).getByText("参与者自行补充资料")).toBeInTheDocument();
   });
 
   it("外观面板可开关降低动态效果与高对比模式", async () => {
     renderRealm();
+    await showSystem();
     const motion = await screen.findByRole("switch", { name: "降低动态效果" });
     expect(motion).toHaveAttribute("aria-checked", "false");
     await userEvent.click(motion);
@@ -271,6 +298,7 @@ describe("我境界 · 成长轨迹", () => {
 
   it("成本面板展示估算与日月累计，凭据只写引用，备份可创建并恢复", async () => {
     renderRealm();
+    await showSystem();
     const heading = await screen.findByRole("heading", { name: "成本与配额" });
     const panel = heading.closest(".panel") as HTMLElement;
 
@@ -288,10 +316,10 @@ describe("我境界 · 成长轨迹", () => {
       "sk-demo-secret",
     );
     await userEvent.click(
-      within(panel).getByRole("button", { name: "写入凭据库" }),
+      within(panel).getByRole("button", { name: "保存密钥" }),
     );
     expect(
-      await within(panel).findByText("密钥已写入系统凭据库，数据库只保留引用名"),
+      await within(panel).findByText("密钥已存进系统密钥库，本应用只记住它的名字"),
     ).toBeInTheDocument();
     expect(within(panel).getByText("已配置")).toBeInTheDocument();
 

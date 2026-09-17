@@ -46,11 +46,11 @@ export function FurnaceTemp({
         <span className="furnace__band">{band.label}</span>
       </div>
       <span className="visually-hidden">
-        环境光强度 {Math.round(ambientGlow(temp) * 100)}%
+        界面亮度 {Math.round(ambientGlow(temp) * 100)}%
       </span>
       {offline ? (
         <span className="furnace__offline" role="status">
-          离线运行 · 已装大师、记录与图谱仍可读可搜
+          离线运行 · 已装大师、记录与网络仍可读可搜
         </span>
       ) : null}
     </aside>

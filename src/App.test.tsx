@@ -94,7 +94,8 @@ describe("应用外壳", () => {
   it("我境界显示运行信息", async () => {
     renderApp();
     await userEvent.click(screen.getByRole("button", { name: /成长与设置/ }));
-    expect(await screen.findByText("数据结构版本")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("tab", { name: "系统" }));
+    expect(await screen.findByText("数据格式版本")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText("memory")).toBeInTheDocument();
     });
@@ -103,18 +104,19 @@ describe("应用外壳", () => {
   it("设置页默认关闭联网，并可逐项启用模型平台", async () => {
     renderApp();
     await userEvent.click(screen.getByRole("button", { name: /成长与设置/ }));
+    await userEvent.click(await screen.findByRole("tab", { name: "系统" }));
     const toggle = await screen.findByRole("switch", { name: "联网能力" });
     expect(toggle).toHaveAttribute("aria-checked", "false");
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(await screen.findByText(/本地模型/)).toBeInTheDocument();
-    expect(await screen.findByText(/E_NETWORK_OFF/)).toBeInTheDocument();
+    expect(await screen.findByText(/联网能力没有开启/)).toBeInTheDocument();
   });
 
   it("联网关闭时炉温环外显示虚线离线态，本机内容仍可读", async () => {
     renderApp();
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "离线运行 · 已装大师、记录与图谱仍可读可搜",
+      "离线运行 · 已装大师、记录与网络仍可读可搜",
     );
     expect(document.querySelector('.furnace[data-offline="true"]')).not.toBeNull();
     // 离线不影响本机内容：星图与记录保持可读。

@@ -4,6 +4,12 @@ import { LayerGlyph } from "../components/LayerGlyph";
 import { RealmShell } from "./RealmShell";
 import { useCommand, useCommands } from "../app/ipc";
 import type { CommandInvocationError } from "../ipc/protocol";
+import {
+  formatTime,
+  masterStatusLabel,
+  roleLabel,
+  sourceKindLabel,
+} from "../domain/labels";
 import type {
   AssetRootView,
   AssetSummary,
@@ -16,7 +22,7 @@ import type {
   SkillView,
 } from "../ipc/commands";
 
-type VaultView = "masters" | "assets" | "terrain";
+type VaultView = "masters" | "archive" | "assets" | "terrain";
 
 /**
  * 藏：大师与资产。层次覆盖矩阵是选角的地基，空缺一眼可见；
@@ -62,6 +68,15 @@ export function VaultRealm() {
         <button
           type="button"
           role="tab"
+          aria-selected={view === "archive"}
+          data-on={view === "archive"}
+          onClick={() => setView("archive")}
+        >
+          大师档案
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={view === "assets"}
           data-on={view === "assets"}
           onClick={() => setView("assets")}
@@ -83,6 +98,40 @@ export function VaultRealm() {
         <KnowledgeTerrain />
       ) : view === "assets" ? (
         <AssetAtlas />
+      ) : view === "archive" ? (
+        selected ? (
+          <MasterArchive key={selected} masterId={selected} onStatus={setStatus} />
+        ) : (
+          <section className="vault-block">
+            <h2 className="section-head">大师档案</h2>
+            <p className="vault-note">先选一位大师，再看他的完整档案。</p>
+            <ul className="masters">
+              {(masters.data ?? []).map((master) => (
+                <li key={master.id} className="masters__row">
+                  <button
+                    type="button"
+                    className="masters__pick"
+                    onClick={() => setSelected(master.id)}
+                  >
+                    <span className="masters__glyphs">
+                      {master.layers.map((layer) => (
+                        <span key={layer} data-layer={layer} className="masters__glyph">
+                          <LayerGlyph glyph={layerOf(layer).glyph} size={12} />
+                        </span>
+                      ))}
+                    </span>
+                    <span className="masters__name">{master.name}</span>
+                    <span className="masters__domain">{master.domain}</span>
+                    <span className="masters__meta">
+                      v{master.currentVersion} · {master.unitCount} 单元
+                    </span>
+                    <span className="masters__open">查看档案</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
       ) : (
         <>
       <section className="vault-block">
@@ -154,10 +203,11 @@ export function VaultRealm() {
               <button
                 type="button"
                 className="masters__pick"
-                aria-expanded={selected === master.id}
-                onClick={() =>
-                  setSelected(selected === master.id ? null : master.id)
-                }
+                aria-pressed={selected === master.id}
+                onClick={() => {
+                  setSelected(master.id);
+                  setView("archive");
+                }}
               >
                 <span className="masters__glyphs">
                   {master.layers.map((layer) => (
@@ -171,10 +221,8 @@ export function VaultRealm() {
                 <span className="masters__meta mono">
                   v{master.currentVersion} · {master.unitCount} 单元
                 </span>
+                <span className="masters__open">查看档案</span>
               </button>
-              {selected === master.id ? (
-                <MasterPanel masterId={master.id} onStatus={setStatus} />
-              ) : null}
             </li>
           ))}
           {masters.data && masters.data.length === 0 ? (
@@ -198,8 +246,11 @@ export function VaultRealm() {
   );
 }
 
-/** 单个大师的展开面板：四要素、来源标注与版本历史。 */
-function MasterPanel({
+/**
+ * 一位大师的完整档案：他是谁、看重什么、有哪几条技能、版本如何迭代、
+ * 在会诊里说过什么、材料从哪来。档案随每次蒸馏与版本更新一起演化。
+ */
+function MasterArchive({
   masterId,
   onStatus,
 }: {
@@ -208,6 +259,10 @@ function MasterPanel({
 }) {
   const client = useCommands();
   const detail = useCommand("master_detail", { masterId });
+  const history = useCommand("master_history", { masterId, limit: 50 });
+  const corpus = useCommand("corpus_list", { masterId });
+  const [flagging, setFlagging] = useState<string | null>(null);
+  const [flagReason, setFlagReason] = useState("");
 
   if (detail.error) {
     return <p className="vault-error">读取失败：{detail.error.message}</p>;
@@ -218,21 +273,54 @@ function MasterPanel({
 
   const master: MasterDetail = detail.data;
 
-  return (
-    <div className="master-panel">
-      <p className="master-panel__summary">{master.summary}</p>
-      <dl className="master-panel__meta">
-        <div>
-          <dt>风格</dt>
-          <dd>{master.style}</dd>
-        </div>
-        <div>
-          <dt>盲区</dt>
-          <dd>{master.blindSpots}</dd>
-        </div>
-      </dl>
+  async function flagUnit(unitId: string) {
+    const reason = flagReason.trim();
+    if (!reason) {
+      return;
+    }
+    try {
+      await client.call("master_flag_unit", { unitId, reason });
+      setFlagging(null);
+      setFlagReason("");
+      onStatus("已标记这条技能的问题");
+    } catch (cause) {
+      onStatus(`标记失败：${(cause as CommandInvocationError).message}`);
+    }
+  }
 
-      <ul className="units">
+  return (
+    <div className="master-archive">
+      <section className="vault-block">
+        <div className="master-archive__head">
+          <div>
+            <h2 className="section-head">{master.name}</h2>
+            <p className="master-archive__domain">
+              {master.domain} ·{" "}
+              {master.layers.map((layer) => layerOf(layer).name).join(" / ")} ·{" "}
+              {masterStatusLabel(master.status)}
+            </p>
+          </div>
+          <span className="master-archive__version mono">v{master.currentVersion}</span>
+        </div>
+        <p className="master-panel__summary">{master.summary}</p>
+        <dl className="master-panel__meta">
+          <div>
+            <dt>看重什么</dt>
+            <dd>{master.style}</dd>
+          </div>
+          <div>
+            <dt>容易忽略</dt>
+            <dd>{master.blindSpots}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="vault-block">
+        <h2 className="section-head">
+          技能
+          <span className="mono vault-count">{master.units.length}</span>
+        </h2>
+        <ul className="units">
         {master.units.map((unit) => {
           const layer = layerOf(unit.layer);
           return (
@@ -290,13 +378,54 @@ function MasterPanel({
                   </li>
                 ))}
               </ul>
+              {flagging === unit.id ? (
+                <div className="unit__flag-form">
+                  <input
+                    className="corpus-search__input"
+                    value={flagReason}
+                    placeholder="这条技能哪里有问题？写一句原因"
+                    aria-label={`标记问题原因：${unit.title}`}
+                    onChange={(event) => setFlagReason(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="vault-action"
+                    onClick={() => void flagUnit(unit.id)}
+                  >
+                    确认标记
+                  </button>
+                  <button
+                    type="button"
+                    className="vault-action vault-action--quiet"
+                    onClick={() => {
+                      setFlagging(null);
+                      setFlagReason("");
+                    }}
+                  >
+                    取消
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="vault-action vault-action--quiet"
+                  onClick={() => {
+                    setFlagging(unit.id);
+                    setFlagReason("");
+                  }}
+                >
+                  标记问题
+                </button>
+              )}
             </li>
           );
         })}
-      </ul>
+        </ul>
+      </section>
 
-      <h3 className="section-head section-head--minor">版本历史</h3>
-      <ol className="versions">
+      <section className="vault-block">
+        <h2 className="section-head">认知迭代</h2>
+        <ol className="versions">
         {master.versions.map((version) => (
           <li
             key={version.version}
@@ -309,7 +438,7 @@ function MasterPanel({
               新增 {version.diff.added.length} · 更新 {version.diff.updated.length} ·
               保留 {version.diff.carried}
             </span>
-            <span className="version__time mono">{version.createdAt}</span>
+            <span className="version__time">{formatTime(version.createdAt)}</span>
             {version.version === master.currentVersion ? (
               <span className="version__tag">当前</span>
             ) : (
@@ -329,12 +458,61 @@ function MasterPanel({
             )}
           </li>
         ))}
-      </ol>
+        </ol>
+      </section>
+
+      <section className="vault-block">
+        <h2 className="section-head">观点轨迹</h2>
+        {history.error ? (
+          <p className="vault-error">读取失败：{history.error.message}</p>
+        ) : history.data && history.data.length > 0 ? (
+          <ol className="track">
+            {history.data.map((entry) => (
+              <li key={`${entry.sessionId}-${entry.round}-${entry.role}`} className="track__row">
+                <span className="track__time">{formatTime(entry.createdAt)}</span>
+                <span className="track__role">
+                  {roleLabel(entry.role)}
+                  {entry.masterVersion ? ` · v${entry.masterVersion}` : ""}
+                </span>
+                <span className="track__question">{entry.question}</span>
+                <p className="track__content prose">{entry.content}</p>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="vault-note">这位大师还没有在会诊里发言过。</p>
+        )}
+        <p className="vault-note">
+          只记录他在哪一场、以哪个版本说过什么，方便对照结论是怎么变过来的。
+        </p>
+      </section>
+
+      <section className="vault-block">
+        <h2 className="section-head">材料来源</h2>
+        {corpus.data && corpus.data.length > 0 ? (
+          <ul className="corpus-hits">
+            {corpus.data.map((item) => (
+              <li key={item.id} className="corpus-hit" data-missing={!item.available}>
+                <span className="corpus-hit__title">{item.title}</span>
+                <span className="corpus-hit__ref">{item.locationHint || item.sourceRef}</span>
+                <span className="corpus-hit__mode">
+                  {sourceKindLabel(item.sourceKind)}
+                </span>
+                {item.available ? null : (
+                  <span className="citation__missing">来源缺失</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="vault-note">还没有登记这位大师的材料来源。</p>
+        )}
+      </section>
     </div>
   );
 }
 
-/** 语料检索：短查询走回退匹配，结果标注命中方式与来源。 */
+/** 材料检索：短查询改按文件名匹配，结果标注命中方式与来源。 */
 function CorpusSearch() {
   const client = useCommands();
   const [query, setQuery] = useState("");
@@ -359,29 +537,29 @@ function CorpusSearch() {
 
   return (
     <section className="vault-block">
-      <h2 className="section-head">语料检索</h2>
+      <h2 className="section-head">材料检索</h2>
       <form className="corpus-search" onSubmit={submit}>
         <input
           className="corpus-search__input"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="检索语料标题与来源"
-          aria-label="检索语料"
+          placeholder="按标题或来源查材料"
+          aria-label="检索材料"
         />
         <button type="submit" className="vault-action">
-          检索
+          查找
         </button>
       </form>
-      {error ? <p className="vault-error">检索失败：{error}</p> : null}
+      {error ? <p className="vault-error">查找失败：{error}</p> : null}
       {hits ? (
         <ul className="corpus-hits">
           {hits.map((hit) => (
             <li key={hit.item.id} className="corpus-hit">
               <span className="corpus-hit__title">{hit.item.title}</span>
               <span className="corpus-hit__ref mono">{hit.item.sourceRef}</span>
-              <span className="corpus-hit__mode">
-                {hit.matchedBy === "fts" ? "全文" : "路径"}
-              </span>
+            <span className="corpus-hit__mode">
+                {hit.matchedBy === "fts" ? "内容命中" : "文件名命中"}
+            </span>
             </li>
           ))}
           {hits.length === 0 ? (
@@ -460,7 +638,7 @@ function KnowledgeTerrain() {
     try {
       setHits(await client.call("kb_search", { query: text }));
     } catch (cause) {
-      setNote(cause instanceof Error ? cause.message : "检索失败");
+      setNote(cause instanceof Error ? cause.message : "查找没能完成");
     }
   }
 
@@ -601,17 +779,17 @@ function KnowledgeTerrain() {
         ) : null}
       </ul>
 
-      <h3 className="section-head section-head--minor">主题检索</h3>
+      <h3 className="section-head section-head--minor">按主题查找</h3>
       <form className="corpus-search" onSubmit={search}>
         <input
           className="corpus-search__input"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="全文优先，短词回退路径匹配"
-          aria-label="检索知识库"
+          placeholder="优先查找正文内容，关键词太短时改按文件名"
+          aria-label="查找知识库"
         />
         <button type="submit" className="vault-action">
-          检索
+          查找
         </button>
       </form>
       {hits ? (
@@ -621,7 +799,7 @@ function KnowledgeTerrain() {
               <span className="corpus-hit__title">{hit.document.normalizedName}</span>
               <span className="corpus-hit__ref mono">{hit.document.path}</span>
               <span className="corpus-hit__mode">
-                {hit.matchedBy === "fts" ? "全文" : "路径"}
+                {hit.matchedBy === "fts" ? "内容命中" : "文件名命中"}
               </span>
             </li>
           ))}

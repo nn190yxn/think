@@ -14,12 +14,12 @@ function renderEmber(onOpenCouncil?: (session: CouncilSessionView) => void) {
 }
 
 describe("余烬", () => {
-  it("未处理的洞察聚成一簇余烬，点开后按性质分色漂浮", async () => {
+  it("未处理的发现聚成一簇余烬，点开后按性质分色漂浮", async () => {
     renderEmber();
-    const cluster = await screen.findByRole("button", { name: /余烬，\d+ 条待看洞察/ });
+    const cluster = await screen.findByRole("button", { name: /余烬，\d+ 条待看的发现/ });
     await userEvent.click(cluster);
 
-    const tray = await screen.findByRole("group", { name: "待看洞察" });
+    const tray = await screen.findByRole("group", { name: "待看的发现" });
     expect(tray.querySelectorAll("li")).toHaveLength(3);
     expect(screen.getByText("关联")).toBeInTheDocument();
     expect(screen.getByText("冲突")).toBeInTheDocument();
@@ -29,7 +29,7 @@ describe("余烬", () => {
   it("采纳后卡片离场", async () => {
     renderEmber();
     await userEvent.click(
-      await screen.findByRole("button", { name: /余烬，\d+ 条待看洞察/ }),
+      await screen.findByRole("button", { name: /余烬，\d+ 条待看的发现/ }),
     );
     const title = "两次「先扩张」的判断其实同源";
     const card = (await screen.findByText(title)).closest("li");
@@ -39,15 +39,15 @@ describe("余烬", () => {
     await waitFor(() => expect(screen.queryByText(title)).not.toBeInTheDocument());
   });
 
-  it("转为会诊把洞察送入圆桌", async () => {
+  it("拿去会诊把发现送入圆桌", async () => {
     const onOpenCouncil = vi.fn();
     renderEmber(onOpenCouncil);
     await userEvent.click(
-      await screen.findByRole("button", { name: /余烬，\d+ 条待看洞察/ }),
+      await screen.findByRole("button", { name: /余烬，\d+ 条待看的发现/ }),
     );
-    await screen.findAllByRole("button", { name: "转为会诊" });
+    await screen.findAllByRole("button", { name: "拿去会诊" });
 
-    await userEvent.click(screen.getAllByRole("button", { name: "转为会诊" })[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: "拿去会诊" })[0]!);
     await waitFor(() => expect(onOpenCouncil).toHaveBeenCalledTimes(1));
     expect(onOpenCouncil.mock.calls[0]?.[0]).toMatchObject({ id: expect.any(String) });
   });

@@ -8,6 +8,7 @@ import { FollowUpForm } from "../components/FollowUpForm";
 import { CouncilConclusion } from "../components/CouncilConclusion";
 import { RealmShell } from "./RealmShell";
 import { useCommand, useCommands } from "../app/ipc";
+import { anchorKindLabel, formatTime, queryModeLabel } from "../domain/labels";
 import type {
   CouncilConclusionView,
   CouncilOutcome,
@@ -34,13 +35,6 @@ const STRATEGIES: readonly {
 const DEFAULT_SIZE = 6;
 
 type Phase = "idle" | "selecting" | "running" | "done";
-
-/** 检索发送模式的说明文字。 */
-function queryModeLabel(mode: string): string {
-  return mode === "question"
-    ? "问句模式，发送脱敏后的问句"
-    : "关键词模式，只发送抽取出的关键词";
-}
 
 /** 席位角度：与 CSS 中的旋转保持一致，光束据此对齐。 */
 function seatAngle(index: number): number {
@@ -249,13 +243,13 @@ export function CouncilRealm({
   }
 
   /**
-   * 手动检索。预演开启时首次调用只拿到待发送内容与指纹，确认后才真正发出请求；
-   * 检索结果只作参考，不会进入本次会诊已冻结的检索快照。
+   * 主动查资料。预演开启时首次调用只拿到待发送内容，确认后才真正发出请求；
+   * 结果只作参考，不会算进本次会诊共享的外来材料。
    */
   async function runSearch(confirm?: string) {
     const query = searchQuery.trim();
     if (!query) {
-      setSearchNote("先写下要检索的内容");
+      setSearchNote("先写下要查的内容");
       return;
     }
     setSearchNote(null);
@@ -266,11 +260,11 @@ export function CouncilRealm({
       });
       setSearchOutcome(outcome);
       if (!outcome.pending) {
-        setSearchNote(`本次获得 ${outcome.hits.length} 条外部结果`);
+        setSearchNote(`这次查到 ${outcome.hits.length} 条资料`);
       }
     } catch (cause) {
       setSearchOutcome(null);
-      setSearchNote(cause instanceof Error ? cause.message : "检索失败");
+      setSearchNote(cause instanceof Error ? cause.message : "查询没能完成");
     }
   }
 
@@ -593,8 +587,10 @@ export function CouncilRealm({
           <div className="council__thread" role="status">
             <span className="council__thread-note">
               这是一场追问会话
-              {session.anchorKind ? ` · 锚点类型：${session.anchorKind}` : ""}
-              {session.panelInherited ? " · 已沿用母会话阵容" : " · 未继承母会话阵容"}
+              {session.anchorKind ? ` · 追问对象：${anchorKindLabel(session.anchorKind)}` : ""}
+              {session.panelInherited
+                ? " · 沿用上一场的大师阵容"
+                : " · 这一场另外选人"}
             </span>
             <button
               className="council__thread-back"
@@ -649,7 +645,7 @@ export function CouncilRealm({
                   </span>
                   {seat ? (
                     <>
-                      <span className="seat__score mono">匹配 {seat.score.toFixed(2)}</span>
+                      <span className="seat__score">契合度 {seat.score.toFixed(2)}</span>
                       <button
                         className="seat__pin"
                         type="button"
@@ -681,7 +677,7 @@ export function CouncilRealm({
 
         {outcome ? (
           <section className="verdict">
-            <h2 className="section-head">收敛裁决</h2>
+            <h2 className="section-head">本次结论</h2>
             <p className="prose verdict__text">
               {outcome.conclusion || "本次会诊未产生结论"}
             </p>
@@ -697,7 +693,7 @@ export function CouncilRealm({
             {session?.cancelRequested ? (
               <p className="council__note" data-tone="warn">
                 这场会诊已被取消
-                {session.cancelledAt ? `（取消于 ${session.cancelledAt}）` : ""}
+                {session.cancelledAt ? `（取消于 ${formatTime(session.cancelledAt)}）` : ""}
                 ，已完成的 {outcome.rounds} 轮保留，未跑完的轮次不再执行。
               </p>
             ) : null}
@@ -705,16 +701,17 @@ export function CouncilRealm({
               <p className="council__note">这一场按你的要求没有带你自己的席位。</p>
             ) : null}
             {echoes.length > 0 ? (
-              <section className="echo" aria-label="回音提示">
-                <h3 className="section-head">回音提示</h3>
+              <section className="echo" aria-label="和既有原则重合的地方">
+                <h3 className="section-head">和既有原则重合的地方</h3>
                 <p className="council__note">
-                  结论里有 {echoes.length} 处与既有原则高度重合，值得警惕是不是在自我确认。
+                  结论里有 {echoes.length} 处和你已经沉淀的原则高度重合，
+                  值得留意这是不是只是在自我确认。
                 </p>
                 <ul className="beads">
                   {echoes.map((hit) => (
-                    <li key={hit.nodeId} className="bead">
+                  <li key={hit.nodeId} className="bead">
                       {hit.content}（重合度 {hit.overlap.toFixed(2)}）
-                    </li>
+                  </li>
                   ))}
                 </ul>
                 <button
@@ -729,12 +726,12 @@ export function CouncilRealm({
                 </button>
               </section>
             ) : null}
-            <h3 className="section-head">分歧曲线</h3>
+            <h3 className="section-head">分歧的变化</h3>
             <DivergenceCurve metrics={outcome.metrics} threshold={threshold} />
             {recorded ? <p className="council__note">{recorded}</p> : null}
             <p className="council__note">
               本次讨论共 {outcome.rounds} 轮，首轮 {outcome.answered} 位作答，{outcome.failed}{" "}
-              位调用失败，全部记入调用审计。
+              位没能作答，全部记入调用记录。
             </p>
             <div className="council__verdict-actions">
               <button
@@ -771,7 +768,7 @@ export function CouncilRealm({
             <h2 className="section-head">外部资料</h2>
             <div className="manual-search">
               <label className="manual-search__label" htmlFor="manual-search-input">
-                手动检索
+                主动查资料
               </label>
               <input
                 id="manual-search-input"
@@ -785,7 +782,7 @@ export function CouncilRealm({
                 type="button"
                 onClick={() => void runSearch()}
               >
-                检索
+                查一查
               </button>
             </div>
             {searchOutcome?.pending && searchOutcome.prepared ? (
@@ -801,7 +798,7 @@ export function CouncilRealm({
                 </dl>
                 {searchOutcome.prepared.redacted ? (
                   <p className="preflight__note">
-                    命中脱敏规则，原始串里的敏感内容已按掩码替换后才进入发送串。
+                    检测到敏感内容，已用掩码替换后才发送。
                   </p>
                 ) : null}
                 <div className="preflight__actions">
@@ -817,7 +814,7 @@ export function CouncilRealm({
                     type="button"
                     onClick={() => {
                       setSearchOutcome(null);
-                      setSearchNote("已取消本次检索");
+                      setSearchNote("已取消本次查询");
                     }}
                   >
                     取消
@@ -845,7 +842,7 @@ export function CouncilRealm({
             ) : null}
             {searchNote ? <p className="council__note">{searchNote}</p> : null}
             <p className="council__note" data-tone="muted">
-              手动检索只作参考，不写入本次会诊的检索快照。
+              主动查到的资料只作参考，不会算进本次会诊共享的外来材料。
             </p>
             {background.length === 0 ? (
               <p className="council__note">
@@ -860,9 +857,11 @@ export function CouncilRealm({
                   {background.map((source) => (
                     <li key={source.id} className="external__item">
                       <span className="external__title">{source.title}</span>
-                      <span className="external__meta mono">
-                        获取于 {source.fetchedAt}
-                        {source.publishedAt ? ` · 发布于 ${source.publishedAt}` : ""}
+                      <span className="external__meta">
+                        获取于 {formatTime(source.fetchedAt)}
+                        {source.publishedAt
+                          ? ` · 发布于 ${formatTime(source.publishedAt, { dateOnly: true })}`
+                          : ""}
                       </span>
                       <a
                         className="external__url"
@@ -886,7 +885,7 @@ export function CouncilRealm({
                         masterId}
                     </span>
                     <span className="external__seat-count mono">
-                      补充检索 {list.length} 条
+                      另外查了 {list.length} 条资料
                     </span>
                   </li>
                 ))}
@@ -906,8 +905,9 @@ export function CouncilRealm({
                   <span className="candidate__name">{candidate.name}</span>
                   <span className="candidate__domain">{candidate.domain}</span>
                   <span className="candidate__score mono">
-                    相关 {candidate.relevance.toFixed(2)} · 对立 {candidate.opposition.toFixed(2)} ·
-                    距离 {candidate.domainDistance.toFixed(2)}
+                    相关度 {candidate.relevance.toFixed(2)} · 对立度{" "}
+                    {candidate.opposition.toFixed(2)} · 领域跨度{" "}
+                    {candidate.domainDistance.toFixed(2)}
                   </span>
                 </li>
               ))}

@@ -47,12 +47,36 @@ describe("藏境界 · 知识地形", () => {
     await userEvent.click(screen.getByRole("button", { name: "登记" }));
     expect(await screen.findByText("D:/新资料")).toBeInTheDocument();
 
-    const searchBox = screen.getByRole("textbox", { name: "检索知识库" });
+    const searchBox = screen.getByRole("textbox", { name: "查找知识库" });
     await userEvent.type(searchBox, "规模");
-    await userEvent.click(screen.getByRole("button", { name: "检索" }));
+    await userEvent.click(screen.getByRole("button", { name: "查找" }));
     await waitFor(() =>
       expect(screen.getByText("E:/阅读/规模.epub")).toBeInTheDocument(),
     );
+  });
+});
+
+describe("藏境界 · 大师档案", () => {
+  it("未选大师时提示先选一位", async () => {
+    renderRealm();
+    await userEvent.click(await screen.findByRole("tab", { name: "大师档案" }));
+    expect(await screen.findByText("先选一位大师，再看他的完整档案。")).toBeInTheDocument();
+  });
+
+  it("点大师进入档案，展示技能、认知迭代与材料来源", async () => {
+    renderRealm();
+    const pick = await screen.findAllByRole("button", { name: /查看档案/ });
+    await userEvent.click(pick[0]!);
+
+    expect(await screen.findByRole("heading", { name: "稻盛和夫" })).toBeInTheDocument();
+    expect(screen.getByText(/经营 · 道 \/ 气 · 可用/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^技能/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "认知迭代" })).toBeInTheDocument();
+    expect(screen.getByText("种子包首版")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "观点轨迹" })).toBeInTheDocument();
+    expect(screen.getByText("这位大师还没有在会诊里发言过。")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "材料来源" })).toBeInTheDocument();
+    expect(screen.getByText("稻盛和夫语料")).toBeInTheDocument();
   });
 });
 

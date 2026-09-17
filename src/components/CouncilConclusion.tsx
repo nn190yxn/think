@@ -1,5 +1,6 @@
 import { DivergenceCurve } from "./DivergenceCurve";
 import { SeatSpeech } from "./SeatSpeech";
+import { formatMoney, formatTime } from "../domain/labels";
 import type {
   CouncilConclusionView,
   CouncilSourceView,
@@ -13,15 +14,9 @@ function sentences(text: string): readonly string[] {
     .filter((sentence) => sentence.length > 0);
 }
 
-/** 微元转展示金额：保留两位小数，币种前缀按记账币种给出。 */
-function formatMoney(micros: number, currency: string): string {
-  const amount = (micros / 1_000_000).toFixed(2);
-  return currency === "CNY" ? `¥${amount}` : `${amount} ${currency}`;
-}
-
 function sourcesBlock(sources: readonly CouncilSourceView[]) {
   if (sources.length === 0) {
-    return <p className="conclusion__empty">本次会诊未启用外部检索。</p>;
+    return <p className="conclusion__empty">这次会诊没有用到外部资料。</p>;
   }
   return (
     <ul className="conclusion__sources">
@@ -34,7 +29,7 @@ function sourcesBlock(sources: readonly CouncilSourceView[]) {
                 可疑指令，仅作资料
               </span>
             ) : null}
-            <span className="conclusion__source-time mono">{source.fetchedAt}</span>
+            <span className="conclusion__source-time">{formatTime(source.fetchedAt)}</span>
           </div>
           <p className="conclusion__source-snippet">{source.snippet}</p>
           <a
@@ -47,8 +42,8 @@ function sourcesBlock(sources: readonly CouncilSourceView[]) {
           </a>
           {source.hasBody ? (
             <details className="conclusion__source-body">
-              <summary>展开正文快照</summary>
-              <p>正文已按上限截断后保存在本地快照中。</p>
+              <summary>展开留存的正文</summary>
+              <p>正文太长时只保留前面一段，存在本机。</p>
             </details>
           ) : null}
         </li>
@@ -78,9 +73,7 @@ export function CouncilConclusion({
         <h2 className="section-head">结论详情</h2>
         <p className="prose conclusion__question">{session.question}</p>
         {session.parentSessionId ? (
-          <p className="conclusion__parent mono">
-            追问会话 · 母会话 {session.parentSessionId}
-          </p>
+          <p className="conclusion__parent">这场是由之前一次会诊追问出来的。</p>
         ) : null}
       </header>
 
@@ -109,9 +102,9 @@ export function CouncilConclusion({
       </section>
 
       <section className="conclusion__section">
-        <h3 className="section-head">二 · 分歧与未决</h3>
+        <h3 className="section-head">二 · 还没谈拢的分歧</h3>
         {session.divergences.length === 0 ? (
-          <p className="conclusion__empty">本次会诊没有记录未决分歧。</p>
+          <p className="conclusion__empty">这次没有留下未决的分歧。</p>
         ) : (
           <ul className="conclusion__divergences">
             {session.divergences.map((item) => (
@@ -133,15 +126,15 @@ export function CouncilConclusion({
       </section>
 
       <section className="conclusion__section">
-        <h3 className="section-head">三 · 收敛过程</h3>
+        <h3 className="section-head">三 · 分歧的变化</h3>
         {view.metrics.length === 0 ? (
-          <p className="conclusion__empty">本次会诊尚未产生质询轮指标。</p>
+          <p className="conclusion__empty">还没有可供对比的轮次数据。</p>
         ) : (
           <>
             <DivergenceCurve metrics={view.metrics} threshold={threshold} />
             {single ? (
               <p className="conclusion__note">
-                只有一个质询轮，曲线仅呈现单点，轮次尚不足以观察收敛趋势。
+                目前只有一轮，曲线上只有一个点，还看不出分歧是在收敛还是扩大。
               </p>
             ) : null}
           </>
@@ -149,7 +142,7 @@ export function CouncilConclusion({
       </section>
 
       <section className="conclusion__section">
-        <h3 className="section-head">四 · 逐席依据</h3>
+        <h3 className="section-head">四 · 各位大师的依据</h3>
         {view.speeches.length === 0 ? (
           <p className="conclusion__empty">尚无逐席发言记录。</p>
         ) : (
@@ -164,19 +157,19 @@ export function CouncilConclusion({
       </section>
 
       <section className="conclusion__section">
-        <h3 className="section-head">五 · 外部来源</h3>
+        <h3 className="section-head">五 · 用到的外部资料</h3>
         {sourcesBlock(view.sources)}
       </section>
 
       <section className="conclusion__section">
-        <h3 className="section-head">六 · 演化链与追问</h3>
+        <h3 className="section-head">六 · 前后几次结论</h3>
         {view.history.length === 0 ? (
           <p className="conclusion__empty">同一主题下还没有更早的结论。</p>
         ) : (
           <ol className="conclusion__history">
             {view.history.map((item) => (
               <li key={item.id} className="conclusion__history-item">
-                <span className="conclusion__history-time mono">{item.createdAt}</span>
+                <span className="conclusion__history-time">{formatTime(item.createdAt)}</span>
                 <p className="conclusion__history-text">{item.conclusion || item.question}</p>
                 <button
                   className="conclusion__ask"
@@ -194,13 +187,13 @@ export function CouncilConclusion({
             ))}
           </ol>
         )}
-        <p className="conclusion__prompt-version mono">
-          提示词版本 {view.promptVersion || "未记录"} · 会诊回看可据此复现当时的提问模板
+        <p className="conclusion__prompt-version">
+          提问模板 {view.promptVersion || "未记录"}，回看时可据此还原当时的问法。
         </p>
-        <p className="conclusion__cost mono">
-          本次调用 {view.llmCalls} 次模型 · {view.searchCalls} 次检索 · 费用估算{" "}
+        <p className="conclusion__cost">
+          本次提问模型 {view.llmCalls} 次 · 查资料 {view.searchCalls} 次 · 费用约{" "}
           {formatMoney(view.costMicros, view.currency)}
-          {view.priced ? "" : "（未配置单价，按零计）"}
+          {view.priced ? "" : "（还没填单价，暂按 0 计）"}
         </p>
       </section>
     </article>

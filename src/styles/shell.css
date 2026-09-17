@@ -404,6 +404,9 @@
 }
 
 .star__level {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   padding: var(--sp-1) var(--sp-4);
   border-radius: var(--radius-pill);
   color: var(--text-2);
@@ -940,6 +943,9 @@
 
 .record__chain,
 .record__adopt {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   padding: var(--sp-1) var(--sp-3);
   border: var(--line-w) solid var(--line);
   border-radius: var(--radius-pill);
@@ -1046,6 +1052,9 @@
 }
 
 .strategy {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   padding: var(--sp-1) var(--sp-4);
   border-radius: var(--radius-pill);
   color: var(--text-2);
@@ -1832,6 +1841,25 @@
   border-left-color: var(--layer-qi);
 }
 
+.stress__verdict {
+  margin-left: auto;
+  padding: 0 var(--sp-2);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--text-3);
+  font-size: var(--fs-mono);
+}
+
+.stress__verdict[data-passed="true"] {
+  border-color: color-mix(in srgb, var(--layer-fa) 55%, var(--line));
+  color: var(--layer-fa);
+}
+
+.stress__verdict[data-passed="false"] {
+  border-color: color-mix(in srgb, var(--layer-qi) 55%, var(--line));
+  color: var(--layer-qi);
+}
+
 .stress__q {
   display: flex;
   align-items: center;
@@ -1992,6 +2020,9 @@
 
 .vault-action {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   border: var(--line-w) solid var(--line);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-2) 70%, transparent);
@@ -2066,7 +2097,7 @@
 .masters__pick {
   appearance: none;
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto 1fr auto auto auto;
   align-items: center;
   gap: var(--sp-3);
   width: 100%;
@@ -2105,6 +2136,69 @@
 .masters__meta {
   color: var(--text-3);
   font-size: var(--fs-mono);
+}
+
+.masters__open {
+  color: var(--ember-bright);
+  font-size: var(--fs-mono);
+}
+
+.master-archive__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.master-archive__domain {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+}
+
+.master-archive__version {
+  color: var(--text-2);
+  font-size: var(--fs-mono);
+}
+
+.unit__flag-form {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.track {
+  list-style: none;
+  margin: 0 0 var(--sp-3);
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.track__row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-3);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-meta);
+}
+
+.track__time,
+.track__role {
+  color: var(--text-3);
+  font-size: var(--fs-mono);
+}
+
+.track__question {
+  color: var(--text-1);
+}
+
+.track__content {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-2);
 }
 
 .master-panel {
@@ -2726,6 +2820,9 @@
 }
 
 .ember__actions button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   padding: var(--sp-1) var(--sp-3);
   border: var(--line-w) solid var(--line);
   border-radius: var(--radius-pill);
@@ -2760,6 +2857,9 @@
 }
 
 .adopt-row button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   padding: var(--sp-1) var(--sp-3);
   border: var(--line-w) solid var(--line);
   border-radius: var(--radius-pill);
@@ -2865,7 +2965,8 @@
 
 /* ---------- P7 藏境界视图切换与知识地形 ---------- */
 
-.vault-views {
+.vault-views,
+.self-views {
   display: inline-flex;
   gap: var(--sp-1);
   padding: var(--sp-1);
@@ -2874,7 +2975,12 @@
   background: color-mix(in srgb, var(--bg-2) 55%, transparent);
 }
 
-.vault-views button {
+.self-views {
+  margin-bottom: var(--sp-4);
+}
+
+.vault-views button,
+.self-views button {
   min-height: 32px;
   padding: 0 var(--sp-4);
   border: none;
@@ -2885,7 +2991,8 @@
   cursor: pointer;
 }
 
-.vault-views button[data-on="true"] {
+.vault-views button[data-on="true"],
+.self-views button[data-on="true"] {
   background: var(--bg-0);
   color: var(--text-1);
 }

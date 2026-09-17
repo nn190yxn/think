@@ -1,12 +1,7 @@
 import { layerOf } from "../domain/layers";
 import { LayerGlyph } from "./LayerGlyph";
+import { readableError, roleLabel } from "../domain/labels";
 import type { CouncilSeatSpeech, CouncilSourceView } from "../ipc/commands";
-
-const ROLE_LABEL: Record<string, string> = {
-  answer: "独立作答",
-  cross: "交叉质询",
-  synthesis: "收敛裁决",
-};
 
 const STATUS_LABEL: Record<string, string> = {
   answered: "已作答",
@@ -76,8 +71,8 @@ export function SeatSpeech({
                   </span>
                   <span className="speech__count mono">{seat.rounds.length} 轮</span>
                   {own.length > 0 ? (
-                    <span className="speech__sources mono">
-                      补充检索 {own.length} 条
+                    <span className="speech__sources">
+                      另外查了 {own.length} 条资料
                     </span>
                   ) : null}
                 </summary>
@@ -89,11 +84,13 @@ export function SeatSpeech({
                       <li key={`${round.round}-${round.role}`} className="speech__round">
                         <div className="speech__round-head">
                           <span className="speech__round-label mono">
-                            第 {round.round} 轮 · {ROLE_LABEL[round.role] ?? round.role}
+                            第 {round.round} 轮 · {roleLabel(round.role)}
                           </span>
                           {round.status !== "ok" ? (
-                            <span className="speech__error mono">
-                              {round.errorCode ?? "调用失败"}
+                            <span className="speech__error">
+                              {round.errorCode
+                                ? readableError(round.errorCode)
+                                : "没能完成"}
                             </span>
                           ) : null}
                           {round.status !== "ok" && onRetry ? (
@@ -153,7 +150,9 @@ export function SeatSpeech({
                     <li key={seat.masterId} className="speech__outline-item">
                       <span className="speech__name">{seat.masterName}</span>
                       <span className="speech__outline-text">
-                        {item.status === "ok" ? item.content : `未完成（${item.errorCode ?? "失败"}）`}
+                        {item.status === "ok"
+                          ? item.content
+                          : `未完成（${item.errorCode ? readableError(item.errorCode) : "没能完成"}）`}
                       </span>
                     </li>
                   );
@@ -164,7 +163,7 @@ export function SeatSpeech({
       </details>
 
       <details className="speech__table-wrap">
-        <summary className="speech__outline-summary">表格等效视图</summary>
+        <summary className="speech__outline-summary">表格视图</summary>
         <table className="speech__table" aria-label="逐席发言记录">
           <thead>
             <tr>
@@ -181,8 +180,14 @@ export function SeatSpeech({
                 <tr key={`${seat.masterId}-${item.round}-${item.role}`}>
                   <td>{seat.masterName}</td>
                   <td className="mono">{item.round}</td>
-                  <td>{ROLE_LABEL[item.role] ?? item.role}</td>
-                  <td>{item.status === "ok" ? "已完成" : (item.errorCode ?? "失败")}</td>
+                  <td>{roleLabel(item.role)}</td>
+                  <td>
+                    {item.status === "ok"
+                      ? "已完成"
+                      : item.errorCode
+                        ? readableError(item.errorCode)
+                        : "没能完成"}
+                  </td>
                   <td>{item.content || "—"}</td>
                 </tr>
               )),

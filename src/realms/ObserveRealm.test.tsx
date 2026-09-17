@@ -98,8 +98,8 @@ describe("观境界", () => {
     renderRealm();
     await userEvent.click(await screen.findByRole("button", { name: "心核" }));
     const core = await screen.findByRole("complementary", { name: "心核" });
-    expect(core).toHaveTextContent("全部连线");
-    expect(core).toHaveTextContent("thought_record");
+    expect(core).toHaveTextContent("全部连接");
+    expect(core).toHaveTextContent("思考记录");
   });
 
   it("Space 以选中节点为种子发起会诊", async () => {
@@ -142,7 +142,7 @@ describe("观境界", () => {
     const items = list.querySelectorAll(".graph-list__item");
     expect(items.length).toBeGreaterThan(0);
     expect(list).toHaveTextContent("判断");
-    expect(list).toHaveTextContent("激活");
+    expect(list).toHaveTextContent("活跃度");
     expect(screen.queryByRole("application", { name: "思维星图" })).toBeNull();
   });
 

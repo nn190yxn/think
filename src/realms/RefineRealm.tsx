@@ -3,6 +3,7 @@ import { RealmShell } from "./RealmShell";
 import { useCommands } from "../app/ipc";
 import { LayerGlyph } from "../components/LayerGlyph";
 import { layerOf } from "../domain/layers";
+import { intakeModeLabel, intakeStateLabel } from "../domain/labels";
 import type {
   DiscoverySettings,
   DistillDetail,
@@ -13,18 +14,18 @@ import type {
   SignalView,
 } from "../ipc/commands";
 
-/** 六阶段剖面：stage 键与流水线状态一致，视图只按它高亮。 */
+/** 蒸馏的七个阶段：stage 键与流水线状态一致，视图只按它高亮。 */
 const STAGES: readonly { key: DistillStageKey; label: string; detail: string }[] = [
-  { key: "skeleton", label: "整体理解", detail: "定骨架，等你确认后才加热" },
-  { key: "extract", label: "五路提取", detail: "框架、原则、案例、反例、术语并行" },
-  { key: "verify", label: "三重验证", detail: "跨域佐证、回答新问题、去重" },
-  { key: "compose", label: "生成单元", detail: "四要素齐全才凝成技能锭" },
-  { key: "map", label: "技能地图", detail: "单元之间交叉链接成网" },
-  { key: "stress", label: "压力测试", detail: "投入诱饵题，触发不准就回炉" },
-  { key: "deliver", label: "交付安装", detail: "出炉飞入大师库，落地为席位" },
+  { key: "skeleton", label: "通读材料", detail: "先理出大纲，等你确认后再开始" },
+  { key: "extract", label: "分路提取", detail: "框架、原则、案例、反例、术语同时进行" },
+  { key: "verify", label: "三重验证", detail: "能否跨领域佐证、能否回答新问题、是否与已有内容重复" },
+  { key: "compose", label: "凝成技能", detail: "四个要素齐全才算成立" },
+  { key: "map", label: "连成技能网", detail: "让技能之间彼此关联" },
+  { key: "stress", label: "压力测试", detail: "拿干扰题试试，触发不准就重来" },
+  { key: "deliver", label: "装进大师库", detail: "完成后进入大师库，成为一位可邀请的参与者" },
 ];
 
-/** 五路提取臂，顺序与提取器一致。 */
+/** 五路提取，顺序与提取器一致。 */
 const TRACKS: readonly { key: string; label: string }[] = [
   { key: "framework", label: "框架" },
   { key: "principle", label: "原则" },
@@ -33,7 +34,7 @@ const TRACKS: readonly { key: string; label: string }[] = [
   { key: "term", label: "术语" },
 ];
 
-/** 三层筛网，与三重验证一一对应。 */
+/** 三重验证的判据。 */
 const SIEVES: readonly string[] = ["跨域独立佐证", "能回答未明说的新问题", "与既有方法论不重复"];
 
 const STAGE_ORDER = STAGES.map((stage) => stage.key);
@@ -57,8 +58,8 @@ function stageState(job: DistillJobView, key: DistillStageKey): "done" | "active
 }
 
 /**
- * 炼：蒸馏熔炉。剖面炉体呈现六阶段，五路提取臂、三层筛网与弃料托盘
- * 让用户看清「炼出了什么」与「淘汰了什么、为什么」。
+ * 炼：蒸馏熔炉。按阶段展示蒸馏进度，并让用户看清
+ * 「提炼出了什么」与「淘汰了什么、为什么」。
  */
 export function RefineRealm() {
   const client = useCommands();
@@ -180,7 +181,7 @@ export function RefineRealm() {
       });
       setNote(
         outcome.triggered
-          ? `检索到 ${outcome.discovered} 条，新增 ${outcome.pending} 条待确认`
+          ? `搜集到 ${outcome.discovered} 条，新增 ${outcome.pending} 条待确认`
           : "主动搜集已关闭，本次未发出任何外部请求",
       );
     });
@@ -195,15 +196,16 @@ export function RefineRealm() {
         job ? (
           <div className="refine__job">
             <span className="refine__master">{job.masterName}</span>
-            <span className="mono refine__jobmeta">
-              {job.state === "done" ? "已出窑" : job.stageName} · {job.modelCalls} 次模型调用
+            <span className="refine__jobmeta">
+              {job.state === "done" ? "已出窑" : job.stageName} · 提问模型{" "}
+              {job.modelCalls} 次
             </span>
           </div>
         ) : null
       }
     >
       <section className="furnace">
-        <h2 className="section-head">剖面炉体</h2>
+        <h2 className="section-head">蒸馏历程</h2>
         <ol className="pipeline">
           {STAGES.map((stage, index) => (
             <li
@@ -221,7 +223,7 @@ export function RefineRealm() {
           {!job ? (
             <>
               <button className="action" type="button" onClick={feedManually} disabled={busy}>
-                投喂原料
+                添加材料
               </button>
               <button
                 className="action action--ghost"
@@ -229,25 +231,25 @@ export function RefineRealm() {
                 onClick={startDistill}
                 disabled={busy || !intake}
               >
-                送入蒸馏
+                开始蒸馏
               </button>
             </>
           ) : null}
           {job && job.state === "awaiting_confirmation" ? (
             <button className="action" type="button" onClick={confirmSkeleton} disabled={busy}>
-              确认骨架并加热
+              确认大纲，开始蒸馏
             </button>
           ) : null}
           {job && job.state !== "done" && job.state !== "awaiting_confirmation" ? (
             <button className="action" type="button" onClick={resumeDistill} disabled={busy}>
-              按检查点续跑
+              从上次中断处继续
             </button>
           ) : null}
         </div>
       </section>
 
       <section className="furnace">
-        <h2 className="section-head">五路提取臂</h2>
+        <h2 className="section-head">五路提取</h2>
         <ul className="arms">
           {TRACKS.map((track) => {
             const extracted = draft?.extracted.filter((item) => item.track === track.key) ?? [];
@@ -262,7 +264,7 @@ export function RefineRealm() {
       </section>
 
       <section className="furnace">
-        <h2 className="section-head">三层筛网</h2>
+        <h2 className="section-head">三重验证</h2>
         <ul className="sieves">
           {SIEVES.map((label) => (
             <li key={label} className="sieve">
@@ -275,7 +277,7 @@ export function RefineRealm() {
           ))}
         </ul>
         <div className="tray">
-          <h3 className="tray__head">弃料托盘</h3>
+          <h3 className="tray__head">未通过的候选</h3>
           {draft && draft.excluded.length > 0 ? (
             <ul className="tray__list">
               {draft.excluded.map((item) => (
@@ -292,7 +294,7 @@ export function RefineRealm() {
       </section>
 
       <section className="furnace">
-        <h2 className="section-head">技能锭</h2>
+        <h2 className="section-head">提炼出的技能</h2>
         {draft && draft.units.length > 0 ? (
           <ul className="units">
             {draft.units.map((unit) => {
@@ -329,7 +331,7 @@ export function RefineRealm() {
             })}
           </ul>
         ) : (
-          <p className="setting-row__hint">还没有凝成技能锭。</p>
+          <p className="setting-row__hint">还没有提炼出技能。</p>
         )}
       </section>
 
@@ -339,14 +341,17 @@ export function RefineRealm() {
           <>
             <p className="setting-row__hint">
               通过率 <span className="mono">{Math.round(draft.stressPassRate * 100)}%</span>
-              ，诱饵题用于验证触发是否越界。
+              。带「干扰」标记的题目用来验证会不会被误触发。
             </p>
             <ul className="stress">
               {draft.stress.map((item) => (
                 <li key={item.question} className="stress__case" data-passed={item.passed}>
                   <span className="stress__q">
-                    {item.decoy ? <span className="stress__decoy mono">诱饵</span> : null}
+                    {item.decoy ? <span className="stress__decoy">干扰题</span> : null}
                     {item.question}
+                    <span className="stress__verdict" data-passed={item.passed}>
+                      {item.passed ? "通过" : "没通过"}
+                    </span>
                   </span>
                   <span className="stress__a">{item.answer}</span>
                 </li>
@@ -359,13 +364,15 @@ export function RefineRealm() {
       </section>
 
       <section className="furnace">
-        <h2 className="section-head">入库双通道</h2>
+        <h2 className="section-head">入库通道</h2>
         <div className="intake__modes">
           <button className="action action--ghost" type="button" onClick={feedManually} disabled={busy}>
-            手动投喂
+            手动添加
           </button>
-          <span className="intake__status mono">
-            {intake ? `${intake.mode} · ${intake.state}` : "暂无入库任务"}
+          <span className="intake__status">
+            {intake
+              ? `${intakeModeLabel(intake.mode)} · ${intakeStateLabel(intake.state)}`
+              : "暂无入库任务"}
           </span>
         </div>
 
@@ -380,7 +387,7 @@ export function RefineRealm() {
                   <div className="signal__head">
                     <span className="signal__title">{signal.title}</span>
                     <span className="signal__overlap mono">
-                      重叠 {Math.round(signal.overlapRatio * 100)}%
+                      与已有内容重合 {Math.round(signal.overlapRatio * 100)}%
                     </span>
                   </div>
                   <span className="signal__ref mono">{signal.sourceRef}</span>
@@ -391,7 +398,7 @@ export function RefineRealm() {
                       disabled={busy}
                       onClick={() => decideSignals([signal.id], [])}
                     >
-                      接受
+                      采纳
                     </button>
                     <button
                       className="action action--mini action--ghost"
@@ -399,7 +406,7 @@ export function RefineRealm() {
                       disabled={busy}
                       onClick={() => decideSignals([], [signal.id])}
                     >
-                      拒绝
+                      剔除
                     </button>
                   </div>
                 </li>
@@ -411,7 +418,7 @@ export function RefineRealm() {
               disabled={busy}
               onClick={() => decideSignals(pending.map((signal) => signal.id), [])}
             >
-              全部接受
+              全部采纳
             </button>
           </>
         ) : null}
@@ -439,7 +446,7 @@ export function RefineRealm() {
           disabled={busy}
           onClick={runDiscovery}
         >
-          立即检索一批
+          立即搜集一批
         </button>
       </section>
 

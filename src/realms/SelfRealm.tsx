@@ -35,78 +35,46 @@ import type {
 } from "../ipc/commands";
 import { LayerGlyph } from "../components/LayerGlyph";
 import { layerOf } from "../domain/layers";
-
-const CAPTURE_LABELS: Record<string, string> = {
-  clipboard_text: "剪贴板文本",
-  clipboard_image: "剪贴板图片",
-  window: "前台窗口",
-  file: "文件活动",
-};
+import {
+  callPurposeLabel,
+  callStatusLabel,
+  captureExcerpt,
+  captureKindLabel,
+  consolidationModeLabel,
+  connectorStatusLabel,
+  formatBytes,
+  formatDuration,
+  formatMoney,
+  formatTime,
+  platformStatusLabel,
+  queryModeLabel,
+  readableError,
+  sourceKindLabel,
+} from "../domain/labels";
 
 const CONNECTOR_KINDS: readonly { readonly kind: string; readonly label: string }[] = [
   { kind: "search", label: "搜索" },
   { kind: "page", label: "网页阅读" },
-  { kind: "mcp", label: "MCP 工具" },
+  { kind: "mcp", label: "外部工具" },
 ];
 
-/** 各类型连接器地址的样例，避免用户不知道要填什么格式。 */
+/** 各类型外部数据源地址的样例，避免用户不知道要填什么格式。 */
 const CONNECTOR_PLACEHOLDERS: Record<string, string> = {
-  search: "SearXNG 兼容地址，如 http://localhost:8080",
-  page: "待抓取的网页地址，如 https://example.com/post",
-  mcp: "MCP 服务器地址，如 https://example.com/mcp",
-};
-
-const CONNECTOR_PURPOSE_LABELS: Record<string, string> = {
-  council_background: "共享背景检索",
-  council_seat_search: "席位补充检索",
-  distill_discovery: "主动搜集检索",
-  connector_test: "连通测试",
+  search: "搜索服务地址，如 http://localhost:8080",
+  page: "要读取的网页地址，如 https://example.com/post",
+  mcp: "外部工具服务地址，如 https://example.com/mcp",
 };
 
 const CREDENTIAL_SCOPES: readonly { readonly scope: string; readonly label: string }[] = [
   { scope: "platform", label: "模型平台" },
-  { scope: "connector", label: "连接器" },
+  { scope: "connector", label: "外部数据源" },
 ];
 
 const COST_POLICY_LABELS: Record<string, string> = {
-  reject: "拒绝发起",
-  reduce_rounds: "压缩轮次",
-  reduce_seats: "压缩席位",
+  reject: "不发起这次会诊",
+  reduce_rounds: "减少讨论轮数",
+  reduce_seats: "减少参与人数",
 };
-
-/** 整数微元换算成可读金额，1 元 = 1,000,000 微元。 */
-function formatMoney(micros: number, currency: string): string {
-  const unit = currency === "CNY" ? "元" : currency;
-  return `${(micros / 1_000_000).toFixed(4)} ${unit}`;
-}
-
-/** 发送模式的中文说明，用于预演确认面板。 */
-function queryModeLabel(mode: string): string {
-  return mode === "question"
-    ? "问句模式，发送脱敏后的问句"
-    : "关键词模式，只发送抽取出的关键词";
-}
-
-function connectorPurposeLabel(purpose: string): string {
-  return CONNECTOR_PURPOSE_LABELS[purpose] ?? purpose;
-}
-
-function captureLabel(kind: string): string {
-  return CAPTURE_LABELS[kind] ?? kind;
-}
-
-function payloadExcerpt(payload: unknown): string {
-  if (typeof payload === "object" && payload !== null) {
-    const record = payload as Record<string, unknown>;
-    for (const key of ["text", "title", "path", "imageRef"]) {
-      const value = record[key];
-      if (typeof value === "string" && value) {
-        return value.slice(0, 80);
-      }
-    }
-  }
-  return "";
-}
 
 function auditActionLabel(action: string): string {
   switch (action) {
@@ -126,6 +94,9 @@ function auditActionLabel(action: string): string {
 /**
  * 我：成长与设置。P1 阶段先接入运行信息，成长轨迹在 P5 接入。
  */
+/** 「我」分两处看：成长是每天会用的内容，系统是低频的设置与数据。 */
+type SelfView = "growth" | "system";
+
 export function SelfRealm({
   theme,
   onThemeChange,
@@ -140,6 +111,7 @@ export function SelfRealm({
   const db = useCommand("db_status", {});
   const app = useCommand("app_info", {});
   const client = useCommands();
+  const [selfView, setSelfView] = useState<SelfView>("growth");
   const [networking, setNetworking] = useState<boolean | null>(null);
   const [platforms, setPlatforms] = useState<readonly PlatformView[]>([]);
   const [calls, setCalls] = useState<readonly LlmCall[]>([]);
@@ -344,7 +316,7 @@ export function SelfRealm({
     const name = connectorName.trim();
     const endpoint = connectorEndpoint.trim();
     if (!name) {
-      setConnectorNote("先给连接器起一个名字");
+      setConnectorNote("先给这个外部数据源起个名字");
       return;
     }
     setConnectorNote(null);
@@ -355,9 +327,9 @@ export function SelfRealm({
         endpoint,
       });
       await reloadConnectors();
-      setConnectorNote("连接器已保存");
+      setConnectorNote("已保存");
     } catch (cause) {
-      setConnectorNote(cause instanceof Error ? cause.message : "连接器保存失败");
+      setConnectorNote(cause instanceof Error ? cause.message : "没能保存");
     }
   }
 
@@ -370,13 +342,11 @@ export function SelfRealm({
       });
       await reloadConnectors();
     } catch (cause) {
-      setConnectorNote(cause instanceof Error ? cause.message : "连接器切换失败");
+      setConnectorNote(cause instanceof Error ? cause.message : "没能切换");
     }
   }
 
-  /**
-   * 连通测试。预演开启时首次点击只拿到待发送内容与指纹，确认后才真正发出请求。
-   */
+  /** 测试是否能连上。预演开启时首次点击只拿到待发送内容，确认后才真正发出请求。 */
   async function testConnector(connector: ConnectorView, confirm?: string) {
     setConnectorNote(null);
     try {
@@ -392,20 +362,22 @@ export function SelfRealm({
       const call = outcome.call;
       setConnectorNote(
         call?.status === "ok"
-          ? `连通测试通过 · ${call.latencyMs}ms`
-          : `连通测试失败 · ${call?.errorCode ?? "未获得结果"}`,
+          ? `已连上 · 用时 ${formatDuration(call.latencyMs)}`
+          : `没能连上 · ${
+              call?.errorCode ? readableError(call.errorCode) : "没有拿到结果"
+            }`,
       );
       await reloadConnectors();
     } catch (cause) {
-      setConnectorNote(cause instanceof Error ? cause.message : "连通测试失败");
+      setConnectorNote(cause instanceof Error ? cause.message : "测试连接没能完成");
     }
   }
 
-  /** 保存凭据：先写入系统凭据库，再由内核登记引用名。 */
+  /** 保存密钥：先存进系统密钥库，再登记引用名。 */
   async function saveCredential() {
     const owner = credentialOwner.trim();
     if (!owner) {
-      setCredentialNote("先填写归属标识，例如平台代码或连接器名称");
+      setCredentialNote("先填写这条密钥属于谁，例如平台名或外部数据源名");
       return;
     }
     if (!credentialSecret) {
@@ -424,9 +396,9 @@ export function SelfRealm({
         ...current,
         [`${credentialScope}:${owner}`]: true,
       }));
-      setCredentialNote("密钥已写入系统凭据库，数据库只保留引用名");
+      setCredentialNote("密钥已存进系统密钥库，本应用只记住它的名字");
     } catch (cause) {
-      setCredentialNote(cause instanceof Error ? cause.message : "密钥写入失败");
+      setCredentialNote(cause instanceof Error ? cause.message : "没能保存密钥");
     }
   }
 
@@ -434,7 +406,7 @@ export function SelfRealm({
   async function checkCredential() {
     const owner = credentialOwner.trim();
     if (!owner) {
-      setCredentialNote("先填写归属标识");
+      setCredentialNote("先填写这条密钥属于谁");
       return;
     }
     setCredentialNote(null);
@@ -449,7 +421,7 @@ export function SelfRealm({
       }));
       setCredentialNote(present ? "该归属已配置密钥" : "该归属还没有密钥");
     } catch (cause) {
-      setCredentialNote(cause instanceof Error ? cause.message : "凭据状态读取失败");
+      setCredentialNote(cause instanceof Error ? cause.message : "没能读取密钥状态");
     }
   }
 
@@ -460,10 +432,10 @@ export function SelfRealm({
       const created: BackupOutcome = await client.call("backup_create", {});
       setBackups(await client.call("backup_list", { limit: 10 }));
       setCostNote(
-        `已创建备份 · ${(created.sizeBytes / 1024 / 1024).toFixed(1)} MB · 版本 ${created.schemaVersion}`,
+        `已创建备份 · ${formatBytes(created.sizeBytes)} · 数据格式版本 ${created.schemaVersion}`,
       );
     } catch (cause) {
-      setCostNote(cause instanceof Error ? cause.message : "备份创建失败");
+      setCostNote(cause instanceof Error ? cause.message : "没能生成备份");
     }
   }
 
@@ -474,7 +446,7 @@ export function SelfRealm({
       await client.call("backup_restore", { path: backup.path });
       setCostNote("备份已校验并恢复，重启应用后生效");
     } catch (cause) {
-      setCostNote(cause instanceof Error ? cause.message : "恢复失败");
+      setCostNote(cause instanceof Error ? cause.message : "没能恢复数据");
     }
   }
 
@@ -627,7 +599,7 @@ export function SelfRealm({
     try {
       setCapture(await client.call("capture_set_redaction", { enabled: next, terms: [] }));
     } catch {
-      setNote("脱敏开关切换失败");
+      setNote("遮蔽敏感信息的开关没能切换");
     }
   }
 
@@ -744,7 +716,7 @@ export function SelfRealm({
       const outcome = await client.call("data_export", {});
       setExported(outcome);
       setDataEvents(await client.call("data_events", { limit: 12 }));
-      setDataNote(`已导出 ${outcome.rowCount} 行到 ${outcome.path}`);
+      setDataNote(`已导出 ${outcome.rowCount} 条记录`);
     } catch {
       setDataNote("导出失败，请确认数据目录可写");
     }
@@ -764,7 +736,7 @@ export function SelfRealm({
       setPurgeArmed(false);
       await refresh();
       setDataEvents(await client.call("data_events", { limit: 12 }));
-      setDataNote(`已清除 ${outcome.rowCount} 行，清除记录已留痕`);
+      setDataNote(`已清除 ${outcome.rowCount} 条记录，并留下了清除记录`);
     } catch {
       setDataNote("清除失败，已保留原有数据");
     }
@@ -772,14 +744,34 @@ export function SelfRealm({
 
   return (
     <RealmShell realm="self">
-      <section className="panel">
+      <div className="self-views" role="tablist" aria-label="我的视图">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={selfView === "growth"}
+          data-on={selfView === "growth"}
+          onClick={() => setSelfView("growth")}
+        >
+          成长
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={selfView === "system"}
+          data-on={selfView === "system"}
+          onClick={() => setSelfView("system")}
+        >
+          系统
+        </button>
+      </div>
+      <section className="panel" hidden={selfView !== "system"}>
         <h2 className="section-head">外观</h2>
         <div className="setting-row">
           <span className="setting-row__label">主题</span>
           <ThemeToggle theme={theme} onChange={onThemeChange} />
         </div>
         <p className="setting-row__hint">
-          切换只改令牌，不动布局，也不重载画布。
+          换主题只换配色，不会打乱布局，也不会重新加载画布。
         </p>
         <div className="setting-row">
           <span className="setting-row__label">降低动态效果</span>
@@ -798,7 +790,7 @@ export function SelfRealm({
           </button>
         </div>
         <p className="setting-row__hint">
-          开启后取消粒子与背景呼吸，保留状态色变与位置变化。
+          开启后不再飘动粒子、不再有背景呼吸感，状态与位置的变化照常显示。
         </p>
         <div className="setting-row">
           <span className="setting-row__label">高对比模式</span>
@@ -817,11 +809,11 @@ export function SelfRealm({
           </button>
         </div>
         <p className="setting-row__hint">
-          开启后提高文字与描边对比度，层次由几何标记区分，不依赖颜色。
+          开启后文字与边线更清晰，每一层靠不同形状区分，不靠颜色分辨。
         </p>
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "system"}>
         <h2 className="section-head">运行信息</h2>
         <dl className="kv">
           <div className="kv__row">
@@ -829,11 +821,11 @@ export function SelfRealm({
             <dd className="mono">{app.data?.version ?? "读取中"}</dd>
           </div>
           <div className="kv__row">
-            <dt>数据结构版本</dt>
+            <dt>数据格式版本</dt>
             <dd className="mono">{db.data?.schemaVersion ?? "读取中"}</dd>
           </div>
           <div className="kv__row">
-            <dt>日志模式</dt>
+            <dt>数据写入方式</dt>
             <dd className="mono">{db.data?.journalMode ?? "读取中"}</dd>
           </div>
           <div className="kv__row">
@@ -843,15 +835,15 @@ export function SelfRealm({
         </dl>
         {db.error ? (
           <p className="setting-row__hint" data-tone="warn">
-            数据结构未就绪：{db.error.message}
+            数据还没准备好：{db.error.message}
           </p>
         ) : null}
       </section>
 
-      <section className="panel">
-        <h2 className="section-head">铜镜 · 自我蒸馏</h2>
+      <section className="panel" hidden={selfView !== "growth"}>
+        <h2 className="section-head">自我画像</h2>
         <p className="setting-row__hint">
-          累计 {self?.required ?? 20} 条思考记录后解锁。铜镜从你自己的历史记录蒸出一份初稿，
+          累计 {self?.required ?? 20} 条思考记录后解锁。系统会从你过去的记录里提炼一份初稿，
           逐条确认采纳后，「你」会成为之后每一次会诊的第七位与会者，用来对照现在的你与当时的你。
         </p>
         {self ? (
@@ -864,7 +856,7 @@ export function SelfRealm({
               <div
                 className="mirror"
                 role="meter"
-                aria-label="自我蒸馏解锁进度"
+                aria-label="自我画像解锁进度"
                 aria-valuenow={Math.min(self.recordCount, self.required)}
                 aria-valuemin={0}
                 aria-valuemax={self.required}
@@ -879,14 +871,14 @@ export function SelfRealm({
               </div>
             </div>
             <div className="setting-row">
-              <span className="setting-row__label">蒸出初稿</span>
+              <span className="setting-row__label">提炼初稿</span>
               <button
                 className="consolidate__go"
                 type="button"
                 disabled={!self.unlocked || busy}
                 onClick={() => void startSelf()}
               >
-                {busy ? "蒸馏中" : "启动铜镜"}
+                {busy ? "提炼中" : "开始生成"}
               </button>
               {!self.unlocked ? (
                 <span className="setting-row__hint">
@@ -897,13 +889,13 @@ export function SelfRealm({
             {self.installed ? (
               <div className="setting-row">
                 <span className="setting-row__label">
-                  会诊席位 · 已安装 v{self.currentVersion}
+                  参与会诊的你 · 已安装版本 {self.currentVersion}
                 </span>
                 <button
                   className="switch"
                   type="button"
                   role="switch"
-                  aria-label="自我席位"
+                  aria-label="把你自己加入会诊"
                   aria-checked={self.seatEnabled}
                   data-on={self.seatEnabled}
                   onClick={() => void toggleSelfSeat(!self.seatEnabled)}
@@ -924,10 +916,10 @@ export function SelfRealm({
             </h3>
             {draft.draft.errorCode ? (
               <p className="setting-row__hint" data-tone="warn">
-                上一次蒸馏未成功（{draft.draft.errorCode}）：{draft.draft.note}
+                上一次提炼没成功：{readableError(draft.draft.errorCode, draft.draft.note)}
               </p>
             ) : null}
-            <ul className="self-items" aria-label="自我蒸馏初稿">
+            <ul className="self-items" aria-label="自我画像初稿">
               {draft.items.map((item) => (
                 <li key={item.id} className="self-item" data-status={item.status}>
                   <div className="self-item__head">
@@ -988,7 +980,7 @@ export function SelfRealm({
               ))}
             </ul>
             <div className="setting-row">
-              <span className="setting-row__label">安装为我的大师包</span>
+              <span className="setting-row__label">安装成「你」的档案</span>
               <button
                 className="consolidate__go"
                 type="button"
@@ -1012,7 +1004,7 @@ export function SelfRealm({
         ) : null}
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "system"}>
         <h2 className="section-head">联网与模型平台</h2>
         <div className="setting-row">
           <span className="setting-row__label">联网能力</span>
@@ -1029,18 +1021,20 @@ export function SelfRealm({
           </button>
         </div>
         <p className="setting-row__hint">
-          默认关闭。开启后每次模型调用都会写入审计，密钥由环境变量
-          <span className="mono"> THOUGHT_FORGE_API_KEY </span>
-          提供，不入库。
+          默认关闭。开启后每次向模型提问都会留下记录。密钥不从界面填写，
+          改由系统环境变量 <span className="mono">THOUGHT_FORGE_API_KEY</span> 提供，
+          只存在本机环境里。
         </p>
         <ul className="platforms">
           {platforms.map((platform) => (
             <li key={platform.code} className="platform" data-enabled={platform.enabled}>
               <div className="platform__head">
                 <span className="platform__name">{platform.displayName}</span>
-                <span className="platform__status mono">{platform.status}</span>
+                <span className="platform__status">{platformStatusLabel(platform.status)}</span>
               </div>
-              <span className="platform__endpoint mono">{platform.endpoint || "未配置端点"}</span>
+              <span className="platform__endpoint mono">
+                {platform.endpoint || "还没填服务地址"}
+              </span>
               <button
                 className="platform__toggle"
                 type="button"
@@ -1059,14 +1053,15 @@ export function SelfRealm({
         ) : null}
       </section>
 
-      <section className="panel">
-        <h2 className="section-head">连接器</h2>
+      <section className="panel" hidden={selfView !== "system"}>
+        <h2 className="section-head">外部数据源</h2>
         <p className="setting-row__hint">
-          外部检索逐项开启，默认全部关闭。每次检索都会写入调用审计；MCP 服务器必须能返回工具能力声明才可接入。
+          联网搜索与网页阅读在这里逐项开启，默认全部关闭。每次搜索都会留下记录；
+          外部工具服务必须能返回工具清单才可接入。
         </p>
         <div className="setting-row">
           <span className="setting-row__label">类型</span>
-          <span className="connector-kinds" role="group" aria-label="连接器类型">
+          <span className="connector-kinds" role="group" aria-label="外部数据源类型">
             {CONNECTOR_KINDS.map((item) => (
               <button
                 key={item.kind}
@@ -1089,7 +1084,7 @@ export function SelfRealm({
             id="connector-name"
             className="connector-input"
             value={connectorName}
-            placeholder="例如：本地检索"
+            placeholder="例如：本地搜索"
             onChange={(event) => setConnectorName(event.target.value)}
           />
         </div>
@@ -1110,7 +1105,7 @@ export function SelfRealm({
           type="button"
           onClick={() => void saveConnector()}
         >
-          保存并预检
+          保存并试连
         </button>
         <ul className="connectors">
           {connectors.map((connector) => (
@@ -1122,11 +1117,13 @@ export function SelfRealm({
             >
               <div className="connector__head">
                 <span className="connector__name">{connector.displayName}</span>
-                <span className="connector__kind mono">{connector.kindLabel}</span>
-                <span className="connector__status mono">{connector.status}</span>
+                <span className="connector__kind">{sourceKindLabel(connector.kind)}</span>
+                <span className="connector__status">
+                  {connectorStatusLabel(connector.status)}
+                </span>
               </div>
               <span className="connector__endpoint mono">
-                {connector.endpoint || "未配置地址"}
+                {connector.endpoint || "还没填地址"}
               </span>
               <div className="connector__actions">
                 <button
@@ -1145,7 +1142,7 @@ export function SelfRealm({
                   type="button"
                   onClick={() => void testConnector(connector)}
                 >
-                  连通测试
+                  测试连接
                 </button>
               </div>
             </li>
@@ -1164,7 +1161,7 @@ export function SelfRealm({
             </dl>
             {connectorProbe.outcome.prepared?.redacted ? (
               <p className="preflight__note">
-                命中脱敏规则，原始串里的敏感内容已按掩码替换后才进入发送串。
+                检测到敏感内容，已替换成掩码后才发送。
               </p>
             ) : null}
             <div className="preflight__actions">
@@ -1197,23 +1194,25 @@ export function SelfRealm({
             {connectorNote}
           </p>
         ) : null}
-        <h3 className="section-head section-head--minor">连接器调用审计</h3>
+        <h3 className="section-head section-head--minor">外部数据源调用记录</h3>
         {connectorCalls.length === 0 ? (
-          <p className="setting-row__hint">还没有连接器调用记录。</p>
+          <p className="setting-row__hint">还没有外部数据源的调用记录。</p>
         ) : (
           <ul className="calls">
             {connectorCalls.map((call) => (
               <li key={call.id} className="call" data-status={call.status}>
-                <span className="call__purpose mono">
-                  {connectorPurposeLabel(call.purpose)}
+                <span className="call__purpose">
+                  {callPurposeLabel(call.purpose)}
                 </span>
-                <span className="call__meta mono">
-                  {call.kindLabel} · 发送 {call.querySent || "—"}
-                  {call.redacted ? "（已脱敏）" : ""} · {call.resultCount} 条 ·{" "}
-                  {call.latencyMs}ms
+                <span className="call__meta">
+                  {sourceKindLabel(call.kind)} · 发送 {call.querySent || "—"}
+                  {call.redacted ? "（已遮蔽敏感信息）" : ""} · {call.resultCount} 条 · 用时{" "}
+                  {formatDuration(call.latencyMs)}
                 </span>
-                <span className="call__status mono">
-                  {call.errorCode ?? call.status}
+                <span className="call__status">
+                  {call.errorCode
+                    ? readableError(call.errorCode)
+                    : callStatusLabel(call.status)}
                 </span>
               </li>
             ))}
@@ -1221,21 +1220,23 @@ export function SelfRealm({
         )}
       </section>
 
-      <section className="panel">
-        <h2 className="section-head">调用审计</h2>
+      <section className="panel" hidden={selfView !== "system"}>
+        <h2 className="section-head">模型调用记录</h2>
         {calls.length === 0 ? (
-          <p className="setting-row__hint">还没有模型调用记录。</p>
+          <p className="setting-row__hint">还没有向模型提问的记录。</p>
         ) : (
           <ul className="calls">
             {calls.map((call) => (
               <li key={call.id} className="call" data-status={call.status}>
-                <span className="call__purpose mono">{call.purpose}</span>
-                <span className="call__meta mono">
-                  {call.modelName || call.platformCode || "未指定平台"} · {call.latencyMs}ms · 第{" "}
-                  {call.attempt} 次
+                <span className="call__purpose">{callPurposeLabel(call.purpose)}</span>
+                <span className="call__meta">
+                  {call.modelName || call.platformCode || "未指定平台"} · 用时{" "}
+                  {formatDuration(call.latencyMs)} · 第 {call.attempt} 次
                 </span>
-                <span className="call__status mono">
-                  {call.errorCode ?? call.status}
+                <span className="call__status">
+                  {call.errorCode
+                    ? readableError(call.errorCode)
+                    : callStatusLabel(call.status)}
                 </span>
               </li>
             ))}
@@ -1243,10 +1244,11 @@ export function SelfRealm({
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "system"}>
         <h2 className="section-head">成本与配额</h2>
         <p className="setting-row__hint">
-          每次模型与连接器调用都按整数微元记账，按 UTC 日汇总。上限与超限策略在「调参」里配置。
+          每次模型与外部数据源的调用都会按实际用量记账，按自然日汇总。
+          花到上限之后怎么办，在「调参」里设置。
         </p>
         {estimate && cost ? (
           <div className="cost-grid">
@@ -1255,8 +1257,8 @@ export function SelfRealm({
               <span className="cost-cell__value mono">
                 {formatMoney(estimate.costMicros, cost.currency)}
               </span>
-              <span className="cost-cell__note mono">
-                {estimate.llmCalls} 次模型 · {estimate.searchCalls} 次检索
+              <span className="cost-cell__note">
+                提问模型 {estimate.llmCalls} 次 · 搜索 {estimate.searchCalls} 次
               </span>
             </div>
             <div className="cost-cell">
@@ -1305,9 +1307,9 @@ export function SelfRealm({
           </p>
         ) : null}
 
-        <h3 className="section-head section-head--minor">凭据</h3>
+        <h3 className="section-head section-head--minor">密钥</h3>
         <p className="setting-row__hint">
-          密钥写入操作系统凭据库，数据库只保存引用名，任何字段都不会出现密钥正文。
+          密钥存进系统密钥库，这里只记住它的名字，不会保存密钥本身。
         </p>
         <div className="setting-row">
           <label className="setting-row__label" htmlFor="credential-scope">
@@ -1334,7 +1336,7 @@ export function SelfRealm({
             id="credential-owner"
             className="connector-input"
             value={credentialOwner}
-            placeholder="平台代码或连接器名称"
+            placeholder="平台名或外部数据源名"
             onChange={(event) => setCredentialOwner(event.target.value)}
           />
         </div>
@@ -1353,7 +1355,7 @@ export function SelfRealm({
         </div>
         <div className="credential-actions">
           <button className="connector-save" type="button" onClick={() => void saveCredential()}>
-            写入凭据库
+            保存密钥
           </button>
           <button className="connector__test" type="button" onClick={() => void checkCredential()}>
             查询状态
@@ -1374,8 +1376,8 @@ export function SelfRealm({
 
         <h3 className="section-head section-head--minor">备份与恢复</h3>
         <p className="setting-row__hint">
-          备份产出完整数据文件，恢复前先做完整性校验；迁移前会自动创建一份
-          pre_migration 备份，超出保留份数的旧备份只标记移除。
+          备份会产出一份完整的数据文件，恢复前先校验完整性；数据格式升级前会自动备份一次，
+          超出保留份数的旧备份会标记为已移除。
         </p>
         <button className="connector-save" type="button" onClick={() => void createBackup()}>
           立即备份
@@ -1387,13 +1389,14 @@ export function SelfRealm({
             {backups.map((backup) => (
               <li key={backup.id} className="backup" data-present={backup.present}>
                 <div className="backup__head">
-                  <span className="backup__kind mono">{backup.kind}</span>
-                  <span className="backup__time mono">{backup.createdAt}</span>
+                  <span className="backup__kind">
+                    {backup.kind === "pre_migration" ? "升级前自动备份" : "手动备份"}
+                  </span>
+                  <span className="backup__time">{formatTime(backup.createdAt)}</span>
                 </div>
                 <span className="backup__path mono">{backup.path}</span>
-                <span className="backup__meta mono">
-                  {(backup.sizeBytes / 1024 / 1024).toFixed(1)} MB · 版本 {backup.schemaVersion} ·{" "}
-                  {backup.checksum.slice(0, 12)}
+                <span className="backup__meta">
+                  {formatBytes(backup.sizeBytes)} · 数据格式版本 {backup.schemaVersion}
                 </span>
                 <button
                   className="connector__test"
@@ -1409,11 +1412,11 @@ export function SelfRealm({
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "growth"}>
         <h2 className="section-head">采集台</h2>
         <p className="setting-row__hint">
-          四类采集逐项开关，默认全部关闭。每次开启都要一次显式确认并写入审计；
-          全局暂停时不轮询、不写入。
+          四类采集逐项开关，默认全部关闭。每次开启都需要你确认一次，并留下记录；
+          全局暂停时不再读取、也不再写入。
         </p>
         {capture ? (
           <>
@@ -1443,7 +1446,7 @@ export function SelfRealm({
                   <span className="capture-cap__meta mono">
                     {capability.available
                       ? capability.consentedAt
-                        ? `已同意 · ${capability.consentedAt.slice(0, 10)}`
+                        ? `已同意 · ${formatTime(capability.consentedAt, { dateOnly: true })}`
                         : "尚未开启"
                       : capability.kind === "file"
                         ? "炉口闭合 · 未设置关注目录"
@@ -1536,12 +1539,12 @@ export function SelfRealm({
               </span>
             </div>
             <div className="setting-row">
-              <span className="setting-row__label">脱敏</span>
+              <span className="setting-row__label">遮蔽敏感信息</span>
               <button
                 className="switch"
                 type="button"
                 role="switch"
-                aria-label="脱敏"
+                aria-label="遮蔽敏感信息"
                 aria-checked={capture.redactionEnabled}
                 data-on={capture.redactionEnabled}
                 onClick={() => void toggleRedaction(!capture.redactionEnabled)}
@@ -1593,7 +1596,7 @@ export function SelfRealm({
                     aria-pressed={captureKind === capability.kind}
                     onClick={() => void loadCaptures(capability.kind)}
                   >
-                    {captureLabel(capability.kind)}
+                    {captureKindLabel(capability.kind)}
                   </button>
                 ))}
               </div>
@@ -1605,16 +1608,16 @@ export function SelfRealm({
                 {captures.map((event) => (
                   <li key={event.id} className="capture-row" data-redacted={event.redacted}>
                     <span className="capture-row__kind mono">
-                      {captureLabel(event.kind)}
+                      {captureKindLabel(event.kind)}
                     </span>
                     <span className="capture-row__time mono">
-                      {event.occurredAt.slice(0, 16).replace("T", " ")}
+                      {formatTime(event.occurredAt)}
                     </span>
                     <span className="capture-row__excerpt">
-                      {payloadExcerpt(event.payload) || "无正文"}
+                      {captureExcerpt(event.payload) || "无正文"}
                     </span>
                     {event.redacted ? (
-                      <span className="capture-row__tag">已脱敏</span>
+                      <span className="capture-row__tag">已遮蔽敏感信息</span>
                     ) : null}
                     <button
                       className="capture-row__del"
@@ -1627,18 +1630,16 @@ export function SelfRealm({
                 ))}
               </ul>
             )}
-            <h3 className="section-head section-head--minor">开启审计</h3>
+            <h3 className="section-head section-head--minor">开关记录</h3>
             {captureAudit.length === 0 ? (
               <p className="setting-row__hint">还没有开启记录。</p>
             ) : (
               <ul className="capture-audit">
                 {captureAudit.map((entry) => (
                   <li key={entry.id} className="capture-audit__row">
-                    <span className="mono">
-                      {entry.createdAt.slice(0, 16).replace("T", " ")}
-                    </span>
-                    <span>{captureLabel(entry.kind)}</span>
-                    <span className="mono">{auditActionLabel(entry.action)}</span>
+                    <span>{formatTime(entry.createdAt)}</span>
+                    <span>{captureKindLabel(entry.kind)}</span>
+                    <span>{auditActionLabel(entry.action)}</span>
                   </li>
                 ))}
               </ul>
@@ -1649,7 +1650,7 @@ export function SelfRealm({
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "growth"}>
         <h2 className="section-head">成长轨迹</h2>
         <p className="setting-row__hint">
           同一议题的结论按时间串成演化链，采纳与否都留档。
@@ -1662,7 +1663,9 @@ export function SelfRealm({
               <li key={record.id} className="record" data-adopted={record.adopted}>
                 <div className="record__head">
                   <span className="record__question">{record.question}</span>
-                  <span className="record__time mono">{record.createdAt.slice(0, 10)}</span>
+                  <span className="record__time">
+                    {formatTime(record.createdAt, { dateOnly: true })}
+                  </span>
                 </div>
                 <p className="record__conclusion prose">{record.conclusion}</p>
                 <div className="record__actions">
@@ -1696,7 +1699,9 @@ export function SelfRealm({
             <ol className="chain__list" aria-label="演化链">
               {chain.map((record) => (
                 <li key={record.id} className="chain__item" data-adopted={record.adopted}>
-                  <span className="chain__time mono">{record.createdAt.slice(0, 10)}</span>
+                  <span className="chain__time">
+                    {formatTime(record.createdAt, { dateOnly: true })}
+                  </span>
                   <span className="chain__text">{record.conclusion}</span>
                 </li>
               ))}
@@ -1705,10 +1710,11 @@ export function SelfRealm({
         ) : null}
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "growth"}>
         <h2 className="section-head">记忆固化</h2>
         <p className="setting-row__hint">
-          强化刚被共同唤起的连线，衰减陈旧的，合并重复节点，识别矛盾。
+          把最近一起被想起来的念头连得更紧，让久未被碰到的连接慢慢变淡，
+          合并重复的念头，并找出彼此矛盾的地方。
         </p>
         <button className="consolidate__go" type="button" onClick={() => void consolidate()}>
           立即固化
@@ -1716,19 +1722,19 @@ export function SelfRealm({
         {report ? (
           <dl className="kv">
             <div className="kv__row">
-              <dt>强化连线</dt>
+              <dt>加深了的连接</dt>
               <dd className="mono">{report.strengthenedCount}</dd>
             </div>
             <div className="kv__row">
-              <dt>衰减连线</dt>
+              <dt>变淡了的连接</dt>
               <dd className="mono">{report.decayedCount}</dd>
             </div>
             <div className="kv__row">
-              <dt>合并节点</dt>
+              <dt>合并的重复念头</dt>
               <dd className="mono">{report.mergedCount}</dd>
             </div>
             <div className="kv__row">
-              <dt>识别冲突</dt>
+              <dt>发现的矛盾</dt>
               <dd className="mono">{report.conflictCount}</dd>
             </div>
           </dl>
@@ -1737,11 +1743,11 @@ export function SelfRealm({
           <ul className="runs">
             {runs.map((run) => (
               <li key={run.id} className="run">
-                <span className="run__mode mono">{run.mode}</span>
-                <span className="run__time mono">{run.startedAt.slice(0, 16).replace("T", " ")}</span>
-                <span className="run__counts mono">
-                  +{run.strengthenedCount} / -{run.decayedCount} / 并{run.mergedCount} / 冲
-                  {run.conflictCount}
+                <span className="run__mode">{consolidationModeLabel(run.mode)}</span>
+                <span className="run__time">{formatTime(run.startedAt)}</span>
+                <span className="run__counts">
+                  加深 {run.strengthenedCount} · 变淡 {run.decayedCount} · 合并{" "}
+                  {run.mergedCount} · 矛盾 {run.conflictCount}
                 </span>
               </li>
             ))}
@@ -1749,7 +1755,7 @@ export function SelfRealm({
         ) : null}
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "system"}>
         <h2 className="section-head">调参</h2>
         <p className="setting-row__hint">
           这些数字原本写死在程序里，现在交给你。越界或格式不对的取值整批不会生效。
@@ -1845,7 +1851,7 @@ export function SelfRealm({
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "growth"}>
         <h2 className="section-head">主动助学</h2>
         <p className="setting-row__hint">
           默认关闭。开启后助理会把新念头与网络中的判断、框架做一次轻量碰撞，
@@ -1886,12 +1892,12 @@ export function SelfRealm({
               </div>
             </div>
             <div className="setting-row">
-              <span className="setting-row__label">思考记录落库时碰撞</span>
+              <span className="setting-row__label">记下新想法时顺手碰一碰</span>
               <button
                 className="switch"
                 type="button"
                 role="switch"
-                aria-label="思考记录触发"
+                aria-label="记下新想法时触发"
                 aria-checked={companion.rules.triggerOnRecord}
                 data-on={companion.rules.triggerOnRecord}
                 onClick={() => void toggleRule("triggerOnRecord")}
@@ -1900,12 +1906,12 @@ export function SelfRealm({
               </button>
             </div>
             <div className="setting-row">
-              <span className="setting-row__label">采集内容落库时碰撞</span>
+              <span className="setting-row__label">采集到新内容时顺手碰一碰</span>
               <button
                 className="switch"
                 type="button"
                 role="switch"
-                aria-label="采集触发"
+                aria-label="采集到新内容时触发"
                 aria-checked={companion.rules.triggerOnCapture}
                 data-on={companion.rules.triggerOnCapture}
                 onClick={() => void toggleRule("triggerOnCapture")}
@@ -1919,7 +1925,7 @@ export function SelfRealm({
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "growth"}>
         <h2 className="section-head">演化长河</h2>
         <p className="setting-row__hint">
           同一议题的多次结论沿一条长河排布，点选可并列看到当时的结论与现在的结论。
@@ -1947,7 +1953,7 @@ export function SelfRealm({
         )}
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "growth"}>
         <h2 className="section-head">个人原则</h2>
         <p className="setting-row__hint">
           被连续采纳三次的结论升格为原则，以印章形态陈列，可回溯到它从哪些判断演化而来。
@@ -1962,9 +1968,10 @@ export function SelfRealm({
             {principles.map((seal) => (
               <li key={seal.nodeId} className="seal">
                 <p className="seal__content">{seal.content}</p>
-                <p className="seal__meta mono">
-                  采纳 {seal.adoptedCount} 次 · 激活 {seal.activation.toFixed(2)} ·{" "}
-                  {seal.layers.join("/") || "未标注层次"}
+                <p className="seal__meta">
+                  采纳 {seal.adoptedCount} 次 · 唤醒度 {seal.activation.toFixed(2)} ·{" "}
+                  {seal.layers.map((layer) => layerOf(layer).name).join(" / ") ||
+                    "未标注层次"}
                 </p>
                 <button
                   className="seal__revoke"
@@ -2023,8 +2030,8 @@ export function SelfRealm({
               {revoked.map((item) => (
                 <li key={item.nodeId} className="seal" data-revoked="true">
                   <p className="seal__content">{item.content}</p>
-                  <p className="seal__meta mono">
-                    撤销于 {item.at} · 原因：{item.reason || "未填写"}
+                  <p className="seal__meta">
+                    撤销于 {formatTime(item.at)} · 原因：{item.reason || "未填写"}
                   </p>
                 </li>
               ))}
@@ -2033,7 +2040,7 @@ export function SelfRealm({
         ) : null}
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "growth"}>
         <h2 className="section-head">年轮概览</h2>
         <div className="ring">
           <div className="ring__cell">
@@ -2042,11 +2049,11 @@ export function SelfRealm({
           </div>
           <div className="ring__cell">
             <span className="ring__value mono">{ring?.newEdgeCount ?? 0}</span>
-            <span className="ring__label">近七天新增连线</span>
+            <span className="ring__label">近七天新增的连接</span>
           </div>
           <div className="ring__cell">
             <span className="ring__value mono">{ring?.topNodes.length ?? 0}</span>
-            <span className="ring__label">活跃认知节点</span>
+            <span className="ring__label">最常被想起的念头</span>
           </div>
           <div className="ring__cell">
             <span className="ring__value mono">{ring?.fastestDomains[0]?.domain ?? "—"}</span>
@@ -2055,19 +2062,17 @@ export function SelfRealm({
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel" hidden={selfView !== "system"}>
         <h2 className="section-head">数据主权</h2>
         <p className="setting-row__hint">
-          数据默认只存本机。导出是一份可读的 JSON 归档，只读不改动；清除会删除本机全部数据，
-          需要二次确认，并在清除后留下一条不可回滚的痕迹。
+          数据默认只存本机。导出会生成一份可以直接打开的数据文件，不会改动任何内容；
+          清除会删除本机全部数据，需要二次确认，并在清除后留下一条无法撤销的记录。
         </p>
         {dataScope ? (
           <>
             <div className="setting-row">
-              <span className="setting-row__label">本机数据范围</span>
-              <span className="mono">
-                {dataScope.tableCount} 张表 · {dataScope.rowCount} 行
-              </span>
+              <span className="setting-row__label">本机数据量</span>
+              <span>共 {dataScope.rowCount} 条记录</span>
             </div>
             <ul className="data-tables">
               {dataScope.tables
@@ -2080,15 +2085,14 @@ export function SelfRealm({
                 ))}
             </ul>
             <div className="setting-row">
-              <span className="setting-row__label">导出归档</span>
+              <span className="setting-row__label">导出数据</span>
               <button className="consolidate__go" type="button" onClick={() => void exportData()}>
-                导出为 JSON
+                导出数据文件
               </button>
             </div>
             {exported ? (
               <p className="setting-row__hint">
-                已导出 {exported.rowCount} 行 · {exported.tableCount} 张表 ·{" "}
-                {(exported.bytes / 1024).toFixed(1)} KB
+                已导出 {exported.rowCount} 条记录 · {formatBytes(exported.bytes)}
                 <br />
                 <span className="mono">{exported.path}</span>
               </p>
@@ -2110,20 +2114,16 @@ export function SelfRealm({
                 {dataNote}
               </p>
             ) : null}
-            <h3 className="section-head section-head--minor">数据变动留痕</h3>
+            <h3 className="section-head section-head--minor">导出与清除记录</h3>
             {dataEvents.length === 0 ? (
               <p className="setting-row__hint">还没有导出或清除记录。</p>
             ) : (
               <ul className="data-events">
                 {dataEvents.map((event) => (
                   <li key={event.id} className="data-event" data-kind={event.kind}>
-                    <span className="mono">
-                      {event.createdAt.slice(0, 16).replace("T", " ")}
-                    </span>
+                    <span>{formatTime(event.createdAt)}</span>
                     <span>{event.kindLabel}</span>
-                    <span className="mono">
-                      {event.tableCount} 表 / {event.rowCount} 行
-                    </span>
+                    <span>{event.rowCount} 条记录</span>
                     {event.location ? (
                       <span className="mono data-event__path">{event.location}</span>
                     ) : null}

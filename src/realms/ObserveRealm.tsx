@@ -4,6 +4,7 @@ import { RealmShell } from "./RealmShell";
 import { useCommand, useCommands } from "../app/ipc";
 import { LayerGlyph } from "../components/LayerGlyph";
 import { layerOf } from "../domain/layers";
+import { nodeSourceLabel } from "../domain/labels";
 import type {
   EdgeRelation,
   GraphEdge,
@@ -479,6 +480,14 @@ export function ObserveRealm({
   );
 
   const onWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    // 只有画布获得焦点后才响应滚轮，避免页面滚动经过时误换视点。
+    if (document.activeElement !== event.currentTarget) {
+      return;
+    }
+    if (Math.abs(event.deltaY) < 24) {
+      return;
+    }
+    event.preventDefault();
     setLevel((current) => {
       const index = VIEW_LEVELS.indexOf(current);
       const next = event.deltaY < 0 ? index + 1 : index - 1;
@@ -487,8 +496,8 @@ export function ObserveRealm({
   }, []);
 
   const status = selected
-    ? `已选「${selected.content}」· ${KIND_NAMES[selected.kind]} · 激活 ${selected.activation.toFixed(2)}`
-    : "网络中还没有节点";
+    ? `已选「${selected.content}」· ${KIND_NAMES[selected.kind]} · 活跃度 ${selected.activation.toFixed(2)}`
+    : "网络里还没有念头";
   const recentCaptures = snapshot.data?.recentCaptures ?? 0;
 
   return (
@@ -545,7 +554,7 @@ export function ObserveRealm({
               ))}
             </div>
           ) : null}
-          <ul className="star__legend" aria-label="连线语义">
+          <ul className="star__legend" aria-label="连接的含义">
             {(Object.keys(RELATION_COLORS) as EdgeRelation[]).map((relation) => (
               <li key={relation} className="star__legend-item">
                 <span
@@ -557,7 +566,9 @@ export function ObserveRealm({
               </li>
             ))}
           </ul>
-          <span className="star__hint">J K 移动 · Enter 入心核 · Space 发起会诊</span>
+          <span className="star__hint">
+            J K 移动 · Enter 入心核 · Space 发起会诊 · 点一下画布后滚轮换视点
+          </span>
         </div>
 
         {view === "graph" ? (
@@ -573,7 +584,7 @@ export function ObserveRealm({
             className="star__svg"
             viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
             role="img"
-            aria-label={`思维星图，共 ${nodes.length} 个节点、${edges.length} 条连线`}
+            aria-label={`思维星图，共 ${nodes.length} 个念头、${edges.length} 条连接`}
           >
             <g className="star__halo" opacity={0.2 + temp / 160}>
               <circle cx={VIEW_W / 2} cy={VIEW_H / 2} r={210} />
@@ -688,10 +699,10 @@ export function ObserveRealm({
                   <p className="star__core-content">{selected.content}</p>
                   <p className="star__core-meta">
                     {KIND_NAMES[selected.kind]}
-                    {selected.layers[0] ? ` · ${selected.layers.join(" ")}` : ""} · 激活{" "}
+                    {selected.layers[0] ? ` · ${selected.layers.join(" ")}` : ""} · 活跃度{" "}
                     {selected.activation.toFixed(2)}
                   </p>
-                  <h2 className="star__core-title">全部连线</h2>
+                  <h2 className="star__core-title">全部连接</h2>
                   <ul className="star__links">
                     {(detail?.links ??
                       edges
@@ -732,7 +743,7 @@ export function ObserveRealm({
                     <>
                       <h2 className="star__core-title">来源</h2>
                       <p className="star__core-source mono">
-                        {detail.node.sourceKind} · {detail.node.sourceRef}
+                        {nodeSourceLabel(detail.node.sourceKind)} · {detail.node.sourceRef}
                       </p>
                       <p className="star__core-meta">
                         {detail.activations.length} 次唤醒记录
@@ -750,7 +761,7 @@ export function ObserveRealm({
                   ) : null}
                 </>
               ) : (
-                <p className="star__core-meta">还没有选中的节点</p>
+                <p className="star__core-meta">还没有选中的念头</p>
               )}
             </aside>
           ) : null}
@@ -760,14 +771,14 @@ export function ObserveRealm({
           </p>
           {graph.data?.truncated ? (
             <p className="star__note">
-              仅显示激活度最高的 {nodes.length} / {graph.data.totalNodes} 个节点
+              只显示最活跃的 {nodes.length} / {graph.data.totalNodes} 个念头
             </p>
           ) : null}
         </div>
         ) : (
           <div className="star__equivalent">
             {nodes.length === 0 ? (
-              <p className="star__note">网络中还没有节点。</p>
+              <p className="star__note">网络里还没有念头。</p>
             ) : view === "list" ? (
               <ul className="graph-list" aria-label="思维网络列表">
                 {nodes.map((node) => (
@@ -790,7 +801,7 @@ export function ObserveRealm({
                       {node.layers.length > 0
                         ? node.layers.map((key) => layerOf(key).name).join(" ")
                         : "未标层次"}{" "}
-                      · {communityLabel(node)} · 激活 {node.activation.toFixed(2)} · 连线{" "}
+                      · {communityLabel(node)} · 活跃度 {node.activation.toFixed(2)} · 连接{" "}
                       {degree.get(node.id) ?? 0}
                     </span>
                   </li>
@@ -826,7 +837,7 @@ export function ObserveRealm({
                             {node.content}
                           </button>
                           <span className="graph-outline__meta mono">
-                            {KIND_NAMES[node.kind]} · 激活 {node.activation.toFixed(2)}
+                            {KIND_NAMES[node.kind]} · 活跃度 {node.activation.toFixed(2)}
                           </span>
                         </li>
                       ))}
@@ -866,10 +877,10 @@ export function ObserveRealm({
       </div>
 
       <div className="tally-row">
-        <Tally label="节点" value={nodes.length} hint="已入网络" />
-        <Tally label="连线" value={edges.length} hint="认知关系" />
+        <Tally label="念头" value={nodes.length} hint="已经入网" />
+        <Tally label="连接" value={edges.length} hint="彼此的关系" />
         <Tally label="新入炉" value={recentCaptures} hint="近期采集" />
-        <Tally label="待裁决" value={conflicts.length} hint="冲突待定" />
+        <Tally label="待裁决" value={conflicts.length} hint="矛盾待定" />
       </div>
 
       <section className="panel">
@@ -883,7 +894,7 @@ export function ObserveRealm({
                 <span className="adjudicate__pair">
                   「{nodeLabel(edge.from)}」 ↔ 「{nodeLabel(edge.to)}」
                 </span>
-                <span className="adjudicate__weight mono">权重 {edge.weight.toFixed(2)}</span>
+                <span className="adjudicate__weight">分量 {edge.weight.toFixed(2)}</span>
                 <button
                   className="adjudicate__keep"
                   type="button"

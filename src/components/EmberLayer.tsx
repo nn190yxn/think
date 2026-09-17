@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useCommands } from "../app/ipc";
+import { formatTime } from "../domain/labels";
 import type { CouncilSessionView, Insight, InsightKindKey } from "../ipc/commands";
 
 /** 洞察分色：关联赭金、冲突朱砂、盲区玄青，与层次令牌同源。 */
@@ -30,7 +31,7 @@ export function emberFade(createdAt: string, now: number = Date.now()): number {
  * 余烬：主动助理的推送入口。
  *
  * 不做通知中心，只在画布边缘安静地亮着一簇余烬。点开后洞察以漂浮卡片进场，
- * 每张卡片可采纳、忽略或转为会诊。转为会诊会把洞察直接送入圆桌。
+ * 每张卡片可采纳、剔除或拿去会诊。拿去会诊会把发现直接送入圆桌。
  */
 export function EmberLayer({
   onOpenCouncil,
@@ -69,7 +70,7 @@ export function EmberLayer({
       await client.call("insight_mark", { insightId: insight.id, action });
       setInsights((current) => current.filter((item) => item.id !== insight.id));
     } catch {
-      setNote("处置失败，稍后再试");
+      setNote("没能处理，稍后再试");
     }
   }
 
@@ -81,7 +82,7 @@ export function EmberLayer({
       setOpen(false);
       onOpenCouncil?.(session);
     } catch {
-      setNote("转入会诊失败");
+      setNote("没能转成会诊");
     }
   }
 
@@ -95,14 +96,14 @@ export function EmberLayer({
         className="ember__cluster"
         type="button"
         aria-expanded={open}
-        aria-label={`余烬，${insights.length} 条待看洞察`}
+        aria-label={`余烬，${insights.length} 条待看的发现`}
         onClick={() => setOpen((current) => !current)}
       >
         <span className="ember__glow" aria-hidden="true" />
         <span className="ember__count mono">{insights.length}</span>
       </button>
       {open ? (
-        <div className="ember__tray" role="group" aria-label="待看洞察">
+        <div className="ember__tray" role="group" aria-label="待看的发现">
           {note ? (
             <p className="ember__note" data-tone="warn">
               {note}
@@ -123,14 +124,16 @@ export function EmberLayer({
               >
                 <div className="ember__head">
                   <span className="ember__kind">{KIND_NAMES[insight.kind]}</span>
-                  <span className="ember__time mono">{insight.createdAt.slice(0, 10)}</span>
+                  <span className="ember__time">
+                    {formatTime(insight.createdAt, { dateOnly: true })}
+                  </span>
                 </div>
                 <p className="ember__title">{insight.title}</p>
                 <p className="ember__summary prose">{insight.summary}</p>
-                <p className="ember__link mono">
+                <p className="ember__link">
                   {insight.relatedNodeIds.length > 0
-                    ? `关联 ${insight.relatedNodeIds.length} 个节点`
-                    : "尚无关联节点"}
+                    ? `关联 ${insight.relatedNodeIds.length} 个念头`
+                    : "还没有关联的念头"}
                   {insight.relatedMasterIds.length > 0
                     ? ` · 参考 ${insight.relatedMasterIds.length} 位大师`
                     : ""}
@@ -140,14 +143,14 @@ export function EmberLayer({
                     采纳
                   </button>
                   <button type="button" onClick={() => void dispose(insight, "ignore")}>
-                    忽略
+                    剔除
                   </button>
                   <button
                     className="ember__to-council"
                     type="button"
                     onClick={() => void convert(insight)}
                   >
-                    转为会诊
+                    拿去会诊
                   </button>
                 </div>
               </li>
