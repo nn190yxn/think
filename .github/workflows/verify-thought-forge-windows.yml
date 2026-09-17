@@ -1,0 +1,231 @@
+name: Verify Thought Forge (Windows)
+
+# 云端 Windows 验收：跑在 GitHub 的 windows-latest 真机上，不碰本地电脑。
+#
+# 覆盖的真机项：
+#   V1  桌面壳在 Windows 上编译并跑通全部用例（Linux 上 cfg(windows) 代码不参与编译）
+#   V9  生成 NSIS 与 MSI，静默安装、启动、卸载，并确认数据在卸载后仍在
+#   V16/V17 由 `cargo test -p thought-forge-core` 覆盖（备份往返、迁移前自动备份）
+#
+# 不覆盖：剪贴板与活动窗口采集（云端跑不出交互桌面）、界面截图、
+# 提示词质量与工具清单可读性（判定对象是人的阅读感受）、
+# V10 自动升级（需要先替换 pubkey 与托管地址）。
+#
+# 这一步不需要任何密钥：用 --no-sign 生成未签名包，因此发布前检查
+# （check-release-config.mjs）不在此处作为门禁。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-windows:
+    name: 云端 Windows 真机验收
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: 取出源码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: 安装 Rust 与 clippy
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: 缓存 Rust 编译产物
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 前端类型检查
+        run: pnpm typecheck
+
+      - name: 前端用例
+        run: pnpm test
+
+      - name: 内核用例（含 V16 备份往返与 V17 迁移前备份）
+        working-directory: src-tauri
+        run: cargo test -p thought-forge-core
+
+      - name: 只读检查器自检用例
+        working-directory: src-tauri
+        run: cargo test -p thought-forge-core --examples
+
+      - name: 桌面壳用例（Windows 专有代码只在真机编译，V1）
+        working-directory: src-tauri
+        run: cargo test -p thought-forge-desktop --lib
+
+      - name: Rust 静态检查 · 内核
+        working-directory: src-tauri
+        run: cargo clippy -p thought-forge-core --all-targets -- -D warnings
+
+      - name: Rust 静态检查 · 桌面壳
+        working-directory: src-tauri
+        run: cargo clippy -p thought-forge-desktop --all-targets -- -D warnings
+
+      # 未签名，避免依赖更新签名密钥；这一步产出 V9 的判定对象。
+      # `--no-sign` 足以跳过 updater 签名：tauri-cli 的 sign_updaters 在
+      # 读取 pubkey 与私钥之前就先判断 no_sign 并返回，因此占位的 pubkey 不会
+      # 让构建失败（见 crates/tauri-cli/src/bundle.rs）。
+      - name: 生成 NSIS 与 MSI（V9）
+        run: pnpm tauri build --ci --no-sign --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: 安装、启动、卸载 NSIS 包
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle'
+          $db = "$env:APPDATA\com.thoughtforge.desktop\forge.db"
+
+          $setup = Get-ChildItem "$bundle/nsis/*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $setup) { throw '没有找到 NSIS 安装包' }
+          Write-Host "NSIS 包：$($setup.Name)（$([math]::Round($setup.Length / 1MB, 1)) MB）"
+          # 产物格式：安装包必须是 PE 可执行文件，避免把损坏或空文件当成功。
+          $head = [System.IO.File]::ReadAllBytes($setup.FullName)[0..1]
+          if ($head[0] -ne 0x4D -or $head[1] -ne 0x5A) {
+            throw "NSIS 产物不是 PE 文件（前两字节 $($head[0]),$($head[1])）"
+          }
+
+          Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
+          Write-Host 'NSIS 静默安装：完成'
+
+          # currentUser 模式的缺省安装目录是 $LOCALAPPDATA\ThoughtForge（见 NSIS 模板 .onInit）。
+          $app = $null
+          foreach ($root in @("$env:LOCALAPPDATA\ThoughtForge", "$env:LOCALAPPDATA\Programs\ThoughtForge")) {
+            $candidate = Join-Path $root 'ThoughtForge.exe'
+            if (Test-Path $candidate) { $app = $candidate; break }
+          }
+          if (-not $app) {
+            Write-Host '未在预期位置找到可执行文件，实际内容如下：'
+            Get-ChildItem $env:LOCALAPPDATA -Filter 'ThoughtForge.exe' -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "  $($_.FullName)" }
+            throw '安装后没有找到 ThoughtForge.exe'
+          }
+          Write-Host "安装位置：$app"
+
+          # 应用在 setup 阶段建库并执行迁移，因此「启动后出现 forge.db」
+          # 同时证明 WebView2 初始化成功、迁移在 Windows 上跑通。
+          if (Test-Path $db) { throw '启动前就已存在数据库，无法证明是本次启动创建的' }
+
+          $proc = Start-Process -FilePath $app -PassThru
+          $created = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 2
+            if (Test-Path $db) { $created = $true; break }
+            if ($proc.HasExited) { break }
+          }
+          Write-Host "进程存活：$(-not $proc.HasExited)；启动后创建数据库：$created"
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          if (-not $created) { throw '启动后没有创建数据库：应用可能在 WebView2 初始化阶段退出' }
+
+          $uninstaller = Join-Path (Split-Path $app) 'uninstall.exe'
+          if (Test-Path $uninstaller) {
+            Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait
+            Write-Host "卸载后应用目录仍在：$(Test-Path (Split-Path $app))"
+          } else {
+            Write-Host "没有找到卸载程序：$uninstaller"
+          }
+          Write-Host "卸载后数据仍在：$(Test-Path $db)"
+          if (-not (Test-Path $db)) { throw '卸载把用户数据一起删掉了' }
+
+      # 判定对象是应用在 Windows 上真实建出的库：S1 迁移版本、S2/V2 联网开关与
+      # 平台配置一致性、V8 采集默认全关且关闭后不再产生事件。全新库上共 14 项，
+      # 应为通过 4、跳过 10、未过 0，退出码 0。
+      - name: 用只读检查器校验应用建出的库
+        shell: pwsh
+        working-directory: src-tauri
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $db = "$env:APPDATA\com.thoughtforge.desktop\forge.db"
+          if (-not (Test-Path $db)) { throw "找不到应用建出的数据库：$db" }
+          cargo run -q -p thought-forge-core --example forge_verify -- $db
+          if ($LASTEXITCODE -ne 0) { throw "只读检查器报告未过项（退出码 $LASTEXITCODE）" }
+
+      - name: 安装、启动、卸载 MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundle = 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle'
+          $db = "$env:APPDATA\com.thoughtforge.desktop\forge.db"
+
+          $msi = Get-ChildItem "$bundle/msi/*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $msi) { throw '没有找到 MSI 安装包' }
+          Write-Host "MSI 包：$($msi.Name)（$([math]::Round($msi.Length / 1MB, 1)) MB）"
+          # MSI 是 OLE 复合文档，前四字节固定为 D0 CF 11 E0。
+          $magic = [System.IO.File]::ReadAllBytes($msi.FullName)[0..3]
+          if ($magic[0] -ne 0xD0 -or $magic[1] -ne 0xCF -or $magic[2] -ne 0x11 -or $magic[3] -ne 0xE0) {
+            throw "MSI 产物不是 OLE 复合文档：$($magic -join ',')"
+          }
+
+          Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart" -Wait
+          Write-Host 'MSI 静默安装：完成'
+
+          $app = $null
+          foreach ($root in @("$env:ProgramFiles\ThoughtForge", "${env:ProgramFiles(x86)}\ThoughtForge")) {
+            $candidate = Join-Path $root 'ThoughtForge.exe'
+            if (Test-Path $candidate) { $app = $candidate; break }
+          }
+          if (-not $app) {
+            Write-Host '未在预期位置找到可执行文件，列出候选根目录：'
+            foreach ($root in @("$env:ProgramFiles\ThoughtForge", "${env:ProgramFiles(x86)}\ThoughtForge")) {
+              Write-Host "  $root -> $(Test-Path $root)"
+            }
+            throw '安装后没有找到 ThoughtForge.exe'
+          }
+          Write-Host "安装位置：$app"
+
+          # 数据目录此时已被上一个安装包建好，因此判据是「进程能起来」。
+          $proc = Start-Process -FilePath $app -PassThru
+          Start-Sleep -Seconds 25
+          $alive = -not $proc.HasExited
+          Write-Host "进程存活：$alive；数据库仍在：$(Test-Path $db)"
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          if (-not $alive) { throw "MSI 装出的应用启动后退出（退出码 $($proc.ExitCode)）" }
+
+          Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn /norestart" -Wait
+          Write-Host "卸载后数据仍在：$(Test-Path $db)"
+
+      - name: 汇总
+        shell: pwsh
+        run: |
+          @'
+          ## 云端 Windows 验收结果
+
+          已由本机判定：
+          - V1 桌面壳在 Windows 上编译，内核、桌面壳与只读检查器用例全部通过
+          - V9 NSIS 与 MSI 均可静默安装、启动并创建数据库，卸载后用户数据仍在
+          - V16 备份往返与 V17 迁移前自动备份（内核用例覆盖）
+
+          仍需人工判定（云端没有交互桌面或需要阅读判断）：
+          - V8 剪贴板与活动窗口采集
+          - V3 探针实际耗时观感、V6 逐轮发言质量、V12 提示词隔离、V13 工具清单可读性
+          - V2 界面回填、V7 检查点续跑的操作手感
+          - V10 自动升级（需先替换 pubkey 与托管地址）
+          '@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: 保存安装包
+        uses: actions/upload-artifact@v4
+        with:
+          name: thought-forge-windows-installers
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,74 @@
+name: Release Thought Forge (Windows)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # 占位 pubkey 不会让构建失败，却会让装出来的包无法验证更新签名，
+      # 因此在安装依赖与编译之前先判定，避免带着占位配置产出安装包。
+      - name: Check release config
+        run: node scripts/check-release-config.mjs
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: pnpm typecheck
+
+      - name: Test frontend
+        run: pnpm test
+
+      - name: Test Rust core
+        working-directory: src-tauri
+        run: cargo test -p thought-forge-core
+
+      - name: Test desktop shell
+        working-directory: src-tauri
+        run: cargo test -p thought-forge-desktop --lib
+
+      - name: Lint Rust core
+        working-directory: src-tauri
+        run: cargo clippy -p thought-forge-core --all-targets -- -D warnings
+
+      - name: Lint desktop shell
+        working-directory: src-tauri
+        run: cargo clippy -p thought-forge-desktop --all-targets -- -D warnings
+
+      - name: Build and publish installers
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: thought-forge-v__VERSION__
+          releaseName: Thought Forge v__VERSION__
+          releaseBody: Download the Windows installer (NSIS or MSI) from the release assets.
+          releaseDraft: true
+          prerelease: false
