@@ -554,7 +554,7 @@ export const DEMO_SESSION: CouncilSessionDetail = {
       pinnedIds: [],
       seats: panelSeats("steady"),
       layers: ["dao", "fa", "shu", "qi", "tool", "shi"],
-      gaps: [],
+      gaps: ["shu", "shi"],
       createdAt: DEMO_CREATED_AT,
     },
     {
@@ -564,7 +564,7 @@ export const DEMO_SESSION: CouncilSessionDetail = {
       pinnedIds: ["sun-tzu"],
       seats: panelSeats("clash"),
       layers: ["dao", "fa", "shu", "qi", "tool", "shi"],
-      gaps: [],
+      gaps: ["shu", "shi"],
       createdAt: "2026-09-14T09:15:00Z",
     },
   ],
