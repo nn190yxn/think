@@ -9,20 +9,10 @@ use rusqlite::Connection;
 
 use crate::error::{CoreError, CoreResult};
 use crate::llm::{call_model, ModelClient, RetryPolicy};
-use crate::master::{repo as master_repo, Layer, LAYER_ORDER};
+use crate::master::{repo as master_repo, Layer};
 
 use super::orchestrator::{cross_prompt, independent_prompt};
 use super::{repo, SeatSpeech, RoundSpeech};
-
-/// 席位主要代表的层次：取该大师声明层次中最靠抽象端的一层。
-fn primary_layer(layers: &[Layer]) -> Layer {
-    LAYER_ORDER
-        .iter()
-        .copied()
-        .find(|layer| layers.contains(layer))
-        .or_else(|| layers.first().copied())
-        .unwrap_or(Layer::Fa)
-}
 
 /// 汇总某个阵容轮次下每个席位的发言与状态。
 pub fn seat_speech(
@@ -43,9 +33,10 @@ pub fn seat_speech(
             .as_ref()
             .map(|master| master.name.clone())
             .unwrap_or_else(|| master_id.clone());
-        let layer = master
-            .as_ref()
-            .map(|master| primary_layer(&master.layers))
+        // 以阵容记录的席位指派为准；历史阵容缺映射时按大师层次回退。
+        let layer = panel
+            .layer_of(master_id)
+            .or_else(|| master.as_ref().map(|master| super::primary_layer(&master.layers)))
             .unwrap_or(Layer::Fa);
 
         // 按轮次收集，后写入的记录覆盖先写入的，因此重试结果自然生效。
@@ -116,7 +107,10 @@ pub fn retry_seat(
 
     let master = master_repo::detail(conn, master_id)?;
     let request = if role == "answer" {
-        independent_prompt(&session.question, &master)
+        let layer = panel
+            .layer_of(master_id)
+            .unwrap_or_else(|| super::primary_layer(&master.layers));
+        independent_prompt(&session.question, &master, layer)
     } else {
         let history = history_before(conn, &turns, round)?;
         cross_prompt(&session.question, &master, &history)

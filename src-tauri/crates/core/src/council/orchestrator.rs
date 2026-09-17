@@ -12,7 +12,7 @@ use crate::connector::service::{self as connector_service, Retrieval};
 use crate::cost;
 use crate::error::{CoreError, CoreResult};
 use crate::llm::{call_model, ModelClient, ModelRequest, RetryPolicy};
-use crate::master::{repo as master_repo, MasterDetail, MasterUnitView};
+use crate::master::{repo as master_repo, Layer, MasterDetail, MasterUnitView};
 
 use super::{control, repo, CouncilOutcome, PanelView, SessionView};
 
@@ -21,7 +21,7 @@ const FIRST_CROSS_ROUND: i64 = 2;
 /// 交叉质询累计历史的总长度上限，超出时只保留最近轮次。
 pub const MAX_CROSS_CONTEXT_CHARS: usize = 6000;
 /// 会诊提示词模板版本。每次改动会诊提示词时必须递增，与大师包版本共同构成复现条件。
-pub const PROMPT_VERSION: &str = "2026-09-15.1";
+pub const PROMPT_VERSION: &str = "2026-09-17.1";
 
 fn unit_block(unit: &MasterUnitView) -> String {
     let steps = unit
@@ -42,8 +42,11 @@ fn unit_block(unit: &MasterUnitView) -> String {
     )
 }
 
-/// 第一轮提示词：只含问题与该大师自己的技能单元。
-pub fn independent_prompt(question: &str, master: &MasterDetail) -> ModelRequest {
+/// 第一轮提示词：只含问题、该席位被指派到的题与该大师自己的技能单元。
+///
+/// 六题会诊里每个席位只负责一问，因此提示词明确指定题与核心问题，
+/// 允许席位回答「这一题我的积累不够」，避免把不相干的框架硬套上去。
+pub fn independent_prompt(question: &str, master: &MasterDetail, layer: Layer) -> ModelRequest {
     let units = master
         .units
         .iter()
@@ -55,10 +58,18 @@ pub fn independent_prompt(question: &str, master: &MasterDetail) -> ModelRequest
         format!(
             "你是「{}」，领域是「{}」。请只使用你自己的技能单元回答，\
              不要引用、猜测或提及任何其他大师的观点。若你的技能单元不适用于该问题，\
-             说明不适用的原因。回答控制在 400 字以内，并标注你使用了哪条技能单元。",
-            master.name, master.domain
+             说明不适用的原因。回答控制在 400 字以内，并标注你使用了哪条技能单元。\
+             本轮你负责回答的是「{question}」这一问，请从这一问的角度给出你的判断；\
+             若你在这方面的积累不足，直接说明，不要套用不相干的框架。",
+            master.name,
+            master.domain,
+            question = layer.question(),
         ),
-        format!("问题：{question}\n\n你的技能单元：\n{units}"),
+        format!(
+            "问题：{question}\n\n本轮你负责的题：{}（{}）\n\n你的技能单元：\n{units}",
+            layer.name(),
+            layer.question(),
+        ),
     )
     .with_prompt_version(PROMPT_VERSION)
 }
@@ -68,8 +79,9 @@ pub fn independent_prompt_with_sources(
     question: &str,
     master: &MasterDetail,
     sources: &str,
+    layer: Layer,
 ) -> ModelRequest {
-    let mut request = independent_prompt(question, master);
+    let mut request = independent_prompt(question, master, layer);
     if !sources.trim().is_empty() {
         request.user = format!("{sources}\n\n{}", request.user);
     }
@@ -343,7 +355,11 @@ pub fn run_council_with_judge(
             &tuning,
         )?;
         let sources = join_blocks(&background_block, &seat_block);
-        let request = independent_prompt_with_sources(&session.question, &master, &sources);
+        let layer = panel
+            .layer_of(master_id)
+            .unwrap_or_else(|| super::primary_layer(&master.layers));
+        let request =
+            independent_prompt_with_sources(&session.question, &master, &sources, layer);
         match call_model(conn, client, &request, policy) {
             Ok(response) => {
                 save_ok(

@@ -640,9 +640,8 @@ export function CouncilRealm({
                   </span>
                   <span className="seat__layer">{layer.name}</span>
                   <span className="seat__name">{seat?.name ?? "待选角"}</span>
-                  <span className="seat__question">
-                    {seat ? seat.domain : layer.question}
-                  </span>
+                  <span className="seat__question">{layer.question}</span>
+                  {seat ? <span className="seat__domain">{seat.domain}</span> : null}
                   {seat ? (
                     <>
                       <span className="seat__score">契合度 {seat.score.toFixed(2)}</span>

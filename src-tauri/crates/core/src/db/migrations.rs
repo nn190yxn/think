@@ -82,6 +82,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "governance",
         sql: include_str!("../migrations/0014_governance.sql"),
     },
+    Migration {
+        version: 15,
+        name: "seat_questions",
+        sql: include_str!("../migrations/0015_seat_questions.sql"),
+    },
 ];
 
 fn ensure_ledger(conn: &Connection) -> CoreResult<()> {

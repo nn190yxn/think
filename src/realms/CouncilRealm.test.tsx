@@ -34,6 +34,21 @@ describe("圆桌会诊", () => {
     expect(within(divergences).getAllByRole("listitem")).toHaveLength(2);
   });
 
+  it("六个座位各代表一题，入座后显示该题的核心问题", async () => {
+    await runCouncil();
+    const questions = Array.from(document.querySelectorAll(".seat")).map(
+      (seat) => seat.querySelector(".seat__question")?.textContent,
+    );
+    expect(questions).toEqual([
+      "什么值得做",
+      "规律是什么",
+      "具体怎么做",
+      "靠什么心力度过",
+      "用什么载体放大",
+      "现在是不是时候",
+    ]);
+  });
+
   it("空议题时给出提示且不选角", async () => {
     renderRealm();
     await userEvent.click(screen.getByRole("button", { name: "发起会诊" }));
@@ -76,6 +91,8 @@ describe("圆桌会诊", () => {
 
     const speech = document.querySelector(".speech") as HTMLElement;
     expect(within(speech).getAllByText(/第 1 轮 · 独立作答/).length).toBeGreaterThan(0);
+    // 逐席发言标注该席位负责的题，与圆桌口径一致。
+    expect(within(speech).getAllByText(/道 · 什么值得做/).length).toBeGreaterThan(0);
 
     const table = within(speech).getByRole("table", { name: "逐席发言记录" });
     expect(table.querySelectorAll("tbody tr").length).toBeGreaterThan(0);

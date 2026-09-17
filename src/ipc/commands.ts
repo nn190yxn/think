@@ -88,6 +88,16 @@ export interface MasterDetail {
   readonly blindSpots: string;
   readonly units: readonly MasterUnitView[];
   readonly versions: readonly VersionView[];
+  /** 六题档案：按道法术气器势顺序给出每题上的积累深浅。 */
+  readonly layerProfile: readonly LayerProfile[];
+}
+
+export interface LayerProfile {
+  readonly layer: LayerKey;
+  readonly name: string;
+  readonly question: string;
+  readonly unitCount: number;
+  readonly unitTitles: readonly string[];
 }
 
 export interface InstallOutcome {
@@ -195,9 +205,17 @@ export interface CouncilPanel {
   readonly strategy: CouncilStrategy;
   readonly masterIds: readonly string[];
   readonly pinnedIds: readonly string[];
+  /** 与 masterIds 同序的席位指派；历史阵容可能为空数组。 */
+  readonly seats: readonly CouncilSeatRef[];
   readonly layers: readonly LayerKey[];
   readonly gaps: readonly LayerKey[];
   readonly createdAt: string;
+}
+
+/** 席位被指派到的题。 */
+export interface CouncilSeatRef {
+  readonly masterId: string;
+  readonly layer: LayerKey;
 }
 
 export type CouncilTurnRole = "answer" | "cross" | "synthesis";

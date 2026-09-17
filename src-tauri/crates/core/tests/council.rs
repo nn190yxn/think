@@ -199,6 +199,109 @@ fn selection_is_deterministic_for_same_pool_and_strategy() {
 }
 
 #[test]
+fn panel_seats_are_persisted_and_drive_speech() {
+    let conn = seeded_db();
+    let pool = build_pool(&conn);
+    let session =
+        repo::create_session(&conn, question(), &pool.domains, &[], Strategy::Steady).unwrap();
+    let plan =
+        select::select_panel(&conn, &pool, &select::SelectionRequest::new(Strategy::Steady))
+            .unwrap();
+    repo::record_panel(&conn, &session, 0, &plan, &[]).unwrap();
+
+    let panel = repo::latest_panel(&conn, &session).unwrap().expect("阵容已写入");
+    assert_eq!(panel.seats.len(), panel.master_ids.len(), "每个席位都有指派");
+    // 指派到的题必须落在这位大师声明的层次内，否则提示词会指向他没准备的题。
+    for seat in &panel.seats {
+        let detail = masters::detail(&conn, &seat.master_id).unwrap();
+        assert!(
+            detail.layers.contains(&seat.layer),
+            "{} 收到 {} 层的指派，但只声明了 {:?}",
+            seat.master_id,
+            seat.layer,
+            detail.layers
+        );
+    }
+
+    // 逐席发言的题与阵容记录一致，圆桌与逐席列表不再两套口径。
+    for seat in speech::seat_speech(&conn, &session, 0).unwrap() {
+        assert_eq!(seat.layer, panel.layer_of(&seat.master_id).unwrap());
+    }
+}
+
+#[test]
+fn historical_panel_without_seats_falls_back_to_master_layers() {
+    let conn = seeded_db();
+    let pool = build_pool(&conn);
+    let session =
+        repo::create_session(&conn, question(), &pool.domains, &[], Strategy::Steady).unwrap();
+    let plan =
+        select::select_panel(&conn, &pool, &select::SelectionRequest::new(Strategy::Steady))
+            .unwrap();
+    repo::record_panel(&conn, &session, 0, &plan, &[]).unwrap();
+    // 模拟升级前的历史阵容：指派列为空，读取时应回退到大师层次。
+    conn.execute(
+        "UPDATE council_panels SET seats_json = '[]' WHERE session_id = ?1",
+        [session.as_str()],
+    )
+    .unwrap();
+
+    let panel = repo::latest_panel(&conn, &session).unwrap().unwrap();
+    assert_eq!(panel.seats.len(), panel.master_ids.len());
+    for seat in &panel.seats {
+        let detail = masters::detail(&conn, &seat.master_id).unwrap();
+        assert_eq!(
+            seat.layer,
+            thought_forge_core::council::primary_layer(&detail.layers)
+        );
+    }
+}
+
+#[test]
+fn first_round_prompt_names_the_assigned_question() {
+    let conn = seeded_db();
+    let pool = build_pool(&conn);
+    let session =
+        repo::create_session(&conn, question(), &pool.domains, &[], Strategy::Steady).unwrap();
+    let plan =
+        select::select_panel(&conn, &pool, &select::SelectionRequest::new(Strategy::Steady))
+            .unwrap();
+    repo::record_panel(&conn, &session, 0, &plan, &[]).unwrap();
+
+    let client = ScriptedClient::new();
+    let policy = RetryPolicy {
+        attempts: 2,
+        base_delay_ms: 0,
+    };
+    orchestrator::run_council(&conn, &client, &session, &policy).expect("会诊可跑通");
+
+    let panel = repo::latest_panel(&conn, &session).unwrap().unwrap();
+    let calls = client.calls.borrow();
+    for seat in &panel.seats {
+        let master = masters::detail(&conn, &seat.master_id).unwrap();
+        let request = calls
+            .iter()
+            .find(|request| {
+                request.purpose == "council_round1" && request.system.contains(&master.name)
+            })
+            .unwrap_or_else(|| panic!("{} 应有第一轮独立作答", master.name));
+        assert!(
+            request.system.contains(seat.layer.question()),
+            "{} 的第一轮提示词应点名被指派的题「{}」",
+            master.name,
+            seat.layer.question()
+        );
+        assert!(
+            request
+                .user
+                .contains(&format!("{}（{}）", seat.layer.name(), seat.layer.question())),
+            "{} 的第一轮提示词应把题写进正文",
+            master.name
+        );
+    }
+}
+
+#[test]
 fn every_strategy_keeps_layer_coverage() {
     let conn = seeded_db();
     let pool = build_pool(&conn);

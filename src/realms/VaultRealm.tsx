@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { LAYER_KEYS, layerOf } from "../domain/layers";
+import { LAYER_KEYS, layerDepth, layerOf } from "../domain/layers";
 import { LayerGlyph } from "../components/LayerGlyph";
 import { RealmShell } from "./RealmShell";
 import { useCommand, useCommands } from "../app/ipc";
@@ -272,6 +272,9 @@ function MasterArchive({
   }
 
   const master: MasterDetail = detail.data;
+  const profile = layerDepth(master.units);
+  const covered = profile.filter((entry) => entry.count > 0);
+  const deepest = covered.reduce((max, entry) => Math.max(max, entry.count), 0);
 
   async function flagUnit(unitId: string) {
     const reason = flagReason.trim();
@@ -296,7 +299,11 @@ function MasterArchive({
             <h2 className="section-head">{master.name}</h2>
             <p className="master-archive__domain">
               {master.domain} ·{" "}
-              {master.layers.map((layer) => layerOf(layer).name).join(" / ")} ·{" "}
+              {profile
+                .filter((entry) => entry.count > 0)
+                .map((entry) => layerOf(entry.key).name)
+                .join(" / ")}{" "}
+              ·{" "}
               {masterStatusLabel(master.status)}
             </p>
           </div>
@@ -313,6 +320,59 @@ function MasterArchive({
             <dd>{master.blindSpots}</dd>
           </div>
         </dl>
+      </section>
+
+      <section className="vault-block">
+        <h2 className="section-head">
+          六题档案
+          <span className="mono vault-count">
+            {covered.length} / {LAYER_KEYS.length}
+          </span>
+        </h2>
+        <p className="vault-note">
+          六题是所有大师共同面对的问题。题目下有几条技能，就在这一题上有几分积累；
+          空着的题也是信息，代表这一问上他还没有形成自己的框架。
+        </p>
+        <ul className="profile">
+          {profile.map((entry) => {
+            const meta = layerOf(entry.key);
+            const ratio = deepest > 0 ? (entry.count / deepest) * 100 : 0;
+            return (
+              <li
+                key={entry.key}
+                className="profile__row"
+                data-layer={entry.key}
+                data-empty={entry.count === 0}
+              >
+                <div className="profile__line">
+                  <span
+                    className="profile__glyph"
+                    style={{ color: `var(--layer-${entry.key})` }}
+                  >
+                    <LayerGlyph glyph={meta.glyph} size={13} />
+                  </span>
+                  <span className="profile__name">{meta.name}</span>
+                  <span className="profile__question">{meta.question}</span>
+                  <span className="profile__bar" aria-hidden="true">
+                    <span
+                      className="profile__fill"
+                      style={{
+                        width: `${ratio}%`,
+                        background: `var(--layer-${entry.key})`,
+                      }}
+                    />
+                  </span>
+                  <span className="profile__count mono">{entry.count}</span>
+                </div>
+                <p className="profile__units">
+                  {entry.count === 0
+                    ? "这一题还没有积累"
+                    : entry.titles.join("、")}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
       </section>
 
       <section className="vault-block">

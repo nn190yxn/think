@@ -7,8 +7,8 @@ use crate::master::Layer;
 use crate::util::unique_id;
 
 use super::{
-    MasterHistoryEntry, PanelView, RoundMetric, Selection, SessionDetail, SessionView, Strategy,
-    TurnView,
+    MasterHistoryEntry, PanelView, RoundMetric, SeatRef, Selection, SessionDetail, SessionView,
+    Strategy, TurnView,
 };
 
 pub(crate) fn now(conn: &Connection) -> CoreResult<String> {
@@ -37,6 +37,33 @@ fn parse_layers(raw: &str) -> Vec<Layer> {
 
 fn parse_strings(raw: &str) -> Vec<String> {
     serde_json::from_str(raw).unwrap_or_default()
+}
+
+fn seats_json(seats: &[SeatRef]) -> String {
+    serde_json::to_string(seats).unwrap_or_else(|_| "[]".to_string())
+}
+
+fn parse_seats(raw: &str) -> Vec<SeatRef> {
+    serde_json::from_str(raw).unwrap_or_default()
+}
+
+/// 历史阵容缺少席位指派时的回退：按大师声明层次里最靠抽象端的一层。
+fn fallback_seat(conn: &Connection, master_id: &str) -> CoreResult<SeatRef> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT layers_json FROM masters WHERE id = ?1",
+            [master_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let layers = raw
+        .as_deref()
+        .map(parse_layers)
+        .unwrap_or_default();
+    Ok(SeatRef {
+        master_id: master_id.to_string(),
+        layer: super::primary_layer(&layers),
+    })
 }
 
 fn parse_strategy(raw: &str) -> Strategy {
@@ -128,9 +155,10 @@ pub fn copy_panel(
     let created_at = now(conn)?;
     let affected = conn.execute(
         "INSERT INTO council_panels
-             (session_id, rotation, strategy, master_ids_json, pinned_ids_json, layers_json,
-              gaps_json, created_at)
-         SELECT ?3, ?4, strategy, master_ids_json, pinned_ids_json, layers_json, gaps_json, ?5
+             (session_id, rotation, strategy, master_ids_json, pinned_ids_json, seats_json,
+              layers_json, gaps_json, created_at)
+         SELECT ?3, ?4, strategy, master_ids_json, pinned_ids_json, seats_json, layers_json,
+                gaps_json, ?5
          FROM council_panels WHERE session_id = ?1 AND rotation = ?2",
         rusqlite::params![
             source_session_id,
@@ -249,14 +277,24 @@ pub fn record_panel(
     pinned: &[String],
 ) -> CoreResult<()> {
     let created_at = now(conn)?;
+    let seats: Vec<SeatRef> = selection
+        .seats
+        .iter()
+        .map(|seat| SeatRef {
+            master_id: seat.master_id.clone(),
+            layer: seat.layer,
+        })
+        .collect();
     conn.execute(
         "INSERT INTO council_panels
-             (session_id, rotation, strategy, master_ids_json, pinned_ids_json, layers_json, gaps_json, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             (session_id, rotation, strategy, master_ids_json, pinned_ids_json, seats_json,
+              layers_json, gaps_json, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT (session_id, rotation) DO UPDATE SET
              strategy = excluded.strategy,
              master_ids_json = excluded.master_ids_json,
              pinned_ids_json = excluded.pinned_ids_json,
+             seats_json = excluded.seats_json,
              layers_json = excluded.layers_json,
              gaps_json = excluded.gaps_json",
         rusqlite::params![
@@ -265,6 +303,7 @@ pub fn record_panel(
             selection.strategy.as_str(),
             json_array(&selection.master_ids()),
             json_array(pinned),
+            seats_json(&seats),
             layers_json(&selection.layers),
             layers_json(&selection.gaps),
             created_at,
@@ -288,7 +327,8 @@ pub fn latest_rotation(conn: &Connection, session_id: &str) -> CoreResult<Option
 
 pub fn panels(conn: &Connection, session_id: &str) -> CoreResult<Vec<PanelView>> {
     let mut stmt = conn.prepare(
-        "SELECT rotation, strategy, master_ids_json, pinned_ids_json, layers_json, gaps_json, created_at
+        "SELECT rotation, strategy, master_ids_json, pinned_ids_json, layers_json, gaps_json,
+                created_at, seats_json
          FROM council_panels WHERE session_id = ?1 ORDER BY rotation ASC",
     )?;
     let rows = stmt.query_map([session_id], |row| {
@@ -300,11 +340,21 @@ pub fn panels(conn: &Connection, session_id: &str) -> CoreResult<Vec<PanelView>>
             layers: parse_layers(&row.get::<_, String>(4)?),
             gaps: parse_layers(&row.get::<_, String>(5)?),
             created_at: row.get(6)?,
+            seats: parse_seats(&row.get::<_, String>(7)?),
         })
     })?;
     let mut panels = Vec::new();
     for row in rows {
-        panels.push(row?);
+        let mut panel = row?;
+        // 历史阵容没有席位指派时按大师层次回退，保证旧库仍可读。
+        if panel.seats.len() != panel.master_ids.len() {
+            panel.seats = panel
+                .master_ids
+                .iter()
+                .map(|master_id| fallback_seat(conn, master_id))
+                .collect::<CoreResult<Vec<_>>>()?;
+        }
+        panels.push(panel);
     }
     Ok(panels)
 }

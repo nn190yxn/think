@@ -78,6 +78,30 @@ describe("藏境界 · 大师档案", () => {
     expect(screen.getByRole("heading", { name: "材料来源" })).toBeInTheDocument();
     expect(screen.getByText("稻盛和夫语料")).toBeInTheDocument();
   });
+
+  it("六题档案列出六题，空缺题保留并标注", async () => {
+    renderRealm();
+    const pick = await screen.findAllByRole("button", { name: /查看档案/ });
+    await userEvent.click(pick[0]!);
+
+    expect(
+      await screen.findByRole("heading", { name: /六题档案/ }),
+    ).toBeInTheDocument();
+    // 六题的核心问题都在，方便不同大师横向比较。
+    for (const question of [
+      "什么值得做",
+      "规律是什么",
+      "具体怎么做",
+      "靠什么心力度过",
+      "用什么载体放大",
+      "现在是不是时候",
+    ]) {
+      expect(screen.getByText(question)).toBeInTheDocument();
+    }
+    // 稻盛和夫在道与气各有一条技能，其余四题空缺。
+    expect(screen.getAllByText("这一题还没有积累")).toHaveLength(4);
+    expect(screen.getAllByText("心性优先").length).toBeGreaterThan(0);
+  });
 });
 
 describe("藏境界 · 资产图谱", () => {

@@ -65,7 +65,9 @@ export function SeatSpeech({
                     <LayerGlyph glyph={layer.glyph} size={13} />
                   </span>
                   <span className="speech__name">{seat.masterName}</span>
-                  <span className="speech__layer">{layer.name}</span>
+                  <span className="speech__layer">
+                    {layer.name} · {layer.question}
+                  </span>
                   <span className="speech__status" data-status={seat.status}>
                     {STATUS_LABEL[seat.status] ?? seat.status}
                   </span>

@@ -88,3 +88,25 @@ export function coversAllLayers(layers: readonly LayerKey[]): boolean {
   const seen = new Set(layers);
   return LAYER_KEYS.every((key) => seen.has(key));
 }
+
+export interface LayerDepthEntry {
+  readonly key: LayerKey;
+  /** 该题下的技能单元数量，即这位大师在这一题上的积累。 */
+  readonly count: number;
+  readonly titles: readonly string[];
+}
+
+/**
+ * 六题档案：按道法术气器势顺序汇总技能单元。
+ * 深浅完全由单元推导，空缺题保留，便于不同大师横向比较。
+ */
+export function layerDepth(
+  units: readonly { readonly layer: LayerKey; readonly title: string }[],
+): readonly LayerDepthEntry[] {
+  return LAYER_KEYS.map((key) => {
+    const titles = units
+      .filter((unit) => unit.layer === key)
+      .map((unit) => unit.title);
+    return { key, count: titles.length, titles };
+  });
+}

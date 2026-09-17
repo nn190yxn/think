@@ -49,6 +49,19 @@ impl Layer {
         }
     }
 
+    /// 该层次回答的核心问题。六题会诊用它把席位指派讲清楚，
+    /// 取值与前端 `src/domain/layers.ts` 的 `question` 字段逐字一致。
+    pub fn question(self) -> &'static str {
+        match self {
+            Layer::Dao => "什么值得做",
+            Layer::Fa => "规律是什么",
+            Layer::Shu => "具体怎么做",
+            Layer::Qi => "靠什么心力度过",
+            Layer::Tool => "用什么载体放大",
+            Layer::Shi => "现在是不是时候",
+        }
+    }
+
     pub fn parse(value: &str) -> Option<Layer> {
         LAYER_ORDER.iter().copied().find(|layer| layer.as_str() == value)
     }
@@ -135,6 +148,41 @@ pub struct MasterDetail {
     pub blind_spots: String,
     pub units: Vec<MasterUnitView>,
     pub versions: Vec<VersionView>,
+    /// 六题档案：按道法术气器势顺序给出这位大师在每一题上的积累深浅。
+    pub layer_profile: Vec<LayerProfile>,
+}
+
+/// 某位大师在单一层次（题）上的积累。空缺题同样出现在档案里，计数为零。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerProfile {
+    pub layer: Layer,
+    pub name: String,
+    pub question: String,
+    pub unit_count: i64,
+    pub unit_titles: Vec<String>,
+}
+
+/// 按六题顺序汇总技能单元。空缺题保留，深浅只由单元数量决定。
+pub fn layer_profile(units: &[MasterUnitView]) -> Vec<LayerProfile> {
+    LAYER_ORDER
+        .iter()
+        .copied()
+        .map(|layer| {
+            let unit_titles: Vec<String> = units
+                .iter()
+                .filter(|unit| unit.layer == layer)
+                .map(|unit| unit.title.clone())
+                .collect();
+            LayerProfile {
+                layer,
+                name: layer.name().to_string(),
+                question: layer.question().to_string(),
+                unit_count: unit_titles.len() as i64,
+                unit_titles,
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

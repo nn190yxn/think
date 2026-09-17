@@ -165,6 +165,60 @@ fn installs_first_version_with_citations_and_searchable_corpus() {
 }
 
 #[test]
+fn layer_questions_cover_the_six_known_prompts() {
+    let expected = [
+        (Layer::Dao, "什么值得做"),
+        (Layer::Fa, "规律是什么"),
+        (Layer::Shu, "具体怎么做"),
+        (Layer::Qi, "靠什么心力度过"),
+        (Layer::Tool, "用什么载体放大"),
+        (Layer::Shi, "现在是不是时候"),
+    ];
+    for (layer, question) in expected {
+        assert_eq!(layer.question(), question, "{} 的核心问题应稳定", layer.name());
+    }
+}
+
+#[test]
+fn detail_reports_six_question_profile_with_gaps() {
+    let dir = write_pack(
+        &valid_manifest(1, vec![unit("心性优先", "dao"), unit("阿米巴经营", "fa")]),
+        "动机至善，私心了无。",
+    );
+    let mut conn = memory_db();
+    masters::install(&mut conn, dir.path()).expect("安装成功");
+    let detail = masters::detail(&conn, "okada").expect("可读取详情");
+
+    let profile = &detail.layer_profile;
+    assert_eq!(profile.len(), 6, "六题各占一行");
+    let order: Vec<Layer> = profile.iter().map(|entry| entry.layer).collect();
+    assert_eq!(
+        order,
+        vec![
+            Layer::Dao,
+            Layer::Fa,
+            Layer::Shu,
+            Layer::Qi,
+            Layer::Tool,
+            Layer::Shi,
+        ],
+        "六题档案按道法术气器势排列"
+    );
+    for entry in profile {
+        assert_eq!(entry.name, entry.layer.name());
+        assert_eq!(entry.question, entry.layer.question());
+        assert_eq!(entry.unit_count as usize, entry.unit_titles.len());
+    }
+    assert_eq!(profile[0].unit_titles, vec!["心性优先".to_string()]);
+    assert_eq!(profile[1].unit_titles, vec!["阿米巴经营".to_string()]);
+    // 空缺题保留且计数为零，空缺本身是有效信息。
+    for entry in &profile[2..] {
+        assert_eq!(entry.unit_count, 0);
+        assert!(entry.unit_titles.is_empty());
+    }
+}
+
+#[test]
 fn second_version_carries_forward_and_keeps_snapshot() {
     let mut conn = memory_db();
 

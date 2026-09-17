@@ -16,7 +16,7 @@ pub mod followup;
 
 use serde::{Deserialize, Serialize};
 
-use crate::master::Layer;
+use crate::master::{Layer, LAYER_ORDER};
 
 /// 未指定人数时按六层各取一位。
 pub const DEFAULT_PANEL_SIZE: usize = 6;
@@ -133,6 +133,25 @@ impl Selection {
     }
 }
 
+/// 席位被指派到的题：一位大师在本轮阵容中负责回答哪一问。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeatRef {
+    pub master_id: String,
+    pub layer: Layer,
+}
+
+/// 席位主要代表的层次：取大师声明层次里最靠抽象端的一层。
+/// 只用于历史阵容缺少席位指派时的回退，正常路径以阵容记录的指派为准。
+pub fn primary_layer(layers: &[Layer]) -> Layer {
+    LAYER_ORDER
+        .iter()
+        .copied()
+        .find(|layer| layers.contains(layer))
+        .or_else(|| layers.first().copied())
+        .unwrap_or(Layer::Fa)
+}
+
 /// 会诊阵容的一次轮次。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,9 +160,21 @@ pub struct PanelView {
     pub strategy: Strategy,
     pub master_ids: Vec<String>,
     pub pinned_ids: Vec<String>,
+    /// 与 master_ids 同序的席位指派；历史阵容为空，读取方按大师层次回退。
+    pub seats: Vec<SeatRef>,
     pub layers: Vec<Layer>,
     pub gaps: Vec<Layer>,
     pub created_at: String,
+}
+
+impl PanelView {
+    /// 本轮阵容给这位大师指派的题。
+    pub fn layer_of(&self, master_id: &str) -> Option<Layer> {
+        self.seats
+            .iter()
+            .find(|seat| seat.master_id == master_id)
+            .map(|seat| seat.layer)
+    }
 }
 
 /// 一轮发言。

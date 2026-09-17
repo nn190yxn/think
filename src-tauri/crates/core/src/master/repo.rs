@@ -11,8 +11,8 @@ use crate::corpus::repo as corpus_repo;
 use crate::error::{CoreError, CoreResult};
 use crate::master::pack::{self, ValidatedEvidence, ValidatedPack};
 use crate::master::{
-    CoverageMatrix, DomainCoverage, InstallOutcome, Layer, LayerCoverage, MasterDetail,
-    MasterSummary, MasterUnitView, VersionDiff, VersionView, LAYER_ORDER,
+    layer_profile, CoverageMatrix, DomainCoverage, InstallOutcome, Layer, LayerCoverage,
+    MasterDetail, MasterSummary, MasterUnitView, VersionDiff, VersionView, LAYER_ORDER,
 };
 
 fn now(conn: &Connection) -> CoreResult<String> {
@@ -512,6 +512,7 @@ pub fn detail(conn: &Connection, master_id: &str) -> CoreResult<MasterDetail> {
                     current_version: row.get(8)?,
                     units: Vec::new(),
                     versions: Vec::new(),
+                    layer_profile: Vec::new(),
                 })
             },
         )
@@ -548,6 +549,7 @@ pub fn detail(conn: &Connection, master_id: &str) -> CoreResult<MasterDetail> {
         detail.units.push(unit);
     }
 
+    detail.layer_profile = layer_profile(&detail.units);
     detail.versions = versions(conn, master_id)?;
     Ok(detail)
 }

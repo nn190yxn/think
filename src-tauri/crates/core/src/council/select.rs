@@ -38,16 +38,6 @@ impl<'a> SelectionRequest<'a> {
     }
 }
 
-/// 席位主要代表的层次：取该大师声明层次中最靠抽象端的一层。
-fn seat_layer(candidate: &Candidate) -> Layer {
-    LAYER_ORDER
-        .iter()
-        .copied()
-        .find(|layer| candidate.layers.contains(layer))
-        .or_else(|| candidate.layers.first().copied())
-        .unwrap_or(Layer::Fa)
-}
-
 /// 碰撞策略下，候选与已入席者之间的对立度之和。
 fn opposition_to_selected(
     pair_map: &BTreeMap<(String, String), f64>,
@@ -115,7 +105,7 @@ pub fn select_panel(
         if let Some(candidate) = by_id.get(id.as_str()) {
             if selected_ids.insert(candidate.master_id.clone()) {
                 selected.push(candidate.master_id.clone());
-                let layer = seat_layer(candidate);
+                let layer = super::primary_layer(&candidate.layers);
                 covered.insert(layer);
                 seats.push(make_seat(
                     candidate,
@@ -221,7 +211,7 @@ pub fn select_panel(
             Some(candidate) => {
                 selected_ids.insert(candidate.master_id.clone());
                 selected.push(candidate.master_id.clone());
-                let layer = seat_layer(candidate);
+                let layer = super::primary_layer(&candidate.layers);
                 covered.insert(layer);
                 seats.push(make_seat(
                     candidate,

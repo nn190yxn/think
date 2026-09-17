@@ -21,6 +21,7 @@ import type {
   CouncilConclusionView,
   CouncilSelection,
   CouncilSeatSpeech,
+  CouncilSeatRef,
   CouncilSessionDetail,
   CouncilSessionView,
   CouncilSourceView,
@@ -58,7 +59,7 @@ import type {
   TopicView,
   TuningItem,
 } from "./commands";
-import { layerOf, type LayerKey } from "../domain/layers";
+import { layerDepth, layerOf, type LayerKey } from "../domain/layers";
 
 interface DemoMaster {
   readonly id: string;
@@ -329,6 +330,13 @@ export function demoDetail(masterId: string): MasterDetail | null {
         },
       },
     ],
+    layerProfile: layerDepth(master.units).map((entry) => ({
+      layer: entry.key,
+      name: layerOf(entry.key).name,
+      question: layerOf(entry.key).question,
+      unitCount: entry.count,
+      unitTitles: entry.titles,
+    })),
   };
 }
 
@@ -461,6 +469,13 @@ const PANEL_BY_STRATEGY: Record<CouncilStrategy, Record<LayerKey, string>> = {
   },
 };
 
+/** 席位的层次指派，顺序与 `Object.values(PANEL_BY_STRATEGY[...])` 一致。 */
+function panelSeats(strategy: CouncilStrategy): CouncilSeatRef[] {
+  return (Object.entries(PANEL_BY_STRATEGY[strategy]) as [LayerKey, string][]).map(
+    ([layer, masterId]) => ({ masterId, layer }),
+  );
+}
+
 export function demoSelection(
   strategy: CouncilStrategy,
   pinned: readonly string[] = [],
@@ -529,6 +544,7 @@ export const DEMO_SESSION: CouncilSessionDetail = {
       strategy: "steady",
       masterIds: Object.values(PANEL_BY_STRATEGY.steady),
       pinnedIds: [],
+      seats: panelSeats("steady"),
       layers: ["dao", "fa", "shu", "qi", "tool", "shi"],
       gaps: [],
       createdAt: DEMO_CREATED_AT,
@@ -538,6 +554,7 @@ export const DEMO_SESSION: CouncilSessionDetail = {
       strategy: "clash",
       masterIds: Object.values(PANEL_BY_STRATEGY.clash),
       pinnedIds: ["sun-tzu"],
+      seats: panelSeats("clash"),
       layers: ["dao", "fa", "shu", "qi", "tool", "shi"],
       gaps: [],
       createdAt: "2026-09-14T09:15:00Z",

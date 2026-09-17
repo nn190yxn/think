@@ -1139,6 +1139,12 @@
   text-align: center;
 }
 
+.seat__domain {
+  color: var(--text-2);
+  font-size: var(--fs-mono);
+  text-align: center;
+}
+
 .roundtable__core {
   position: relative;
   z-index: 1;
@@ -2159,6 +2165,77 @@
 .master-archive__version {
   color: var(--text-2);
   font-size: var(--fs-mono);
+}
+
+/* 六题档案：每位大师在道法术气器势上的积累深浅。 */
+.profile {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.profile__row {
+  padding: var(--sp-3);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.profile__line {
+  display: grid;
+  grid-template-columns: 1.4em 2.6em minmax(5.5em, auto) 1fr 2.4em;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.profile__glyph {
+  display: inline-flex;
+  align-items: center;
+}
+
+.profile__name {
+  color: var(--text-1);
+  font-family: var(--font-prose);
+  font-size: var(--fs-lead);
+}
+
+.profile__question {
+  color: var(--text-3);
+  font-size: var(--fs-mono);
+}
+
+.profile__bar {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-0);
+  overflow: hidden;
+}
+
+.profile__row[data-empty="true"] .profile__bar {
+  background: transparent;
+  border: var(--line-w) dashed var(--line);
+}
+
+.profile__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.profile__count {
+  color: var(--text-2);
+  text-align: right;
+}
+
+.profile__units {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+}
+
+.profile__row[data-empty="true"] .profile__units {
+  font-style: italic;
 }
 
 .unit__flag-form {
