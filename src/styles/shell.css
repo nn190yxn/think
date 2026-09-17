@@ -1145,6 +1145,50 @@
   text-align: center;
 }
 
+/* 还缺人的题：虚线边框加文字标记，不靠颜色单通道表达。 */
+.seat[data-gap="true"] {
+  border-style: dashed;
+}
+
+.seat__gap {
+  padding: 0 var(--sp-1);
+  border: var(--line-w) dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--fs-mono);
+}
+
+.council__gaps {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+  padding: var(--sp-3);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+}
+
+.council__gap-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.council__gap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  border: var(--line-w) dashed color-mix(in srgb, var(--layer) 55%, transparent);
+  border-radius: var(--radius-pill);
+  color: var(--layer);
+  font-size: var(--fs-meta);
+}
+
 .roundtable__core {
   position: relative;
   z-index: 1;

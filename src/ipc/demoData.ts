@@ -502,7 +502,8 @@ export function demoSelection(
     size: seats.length,
     seats,
     layers: (Object.keys(mapping) as LayerKey[]).sort(),
-    gaps: [],
+    // 演示库里「术」与「势」各只有一位大师，凑不出同题的第二人，所以这两题记为缺口。
+    gaps: ["shu", "shi"],
   };
 }
 

@@ -56,6 +56,23 @@ describe("圆桌会诊", () => {
     expect(document.querySelectorAll('.seat[data-filled="true"]')).toHaveLength(0);
   });
 
+  it("还缺人的题单独列出，并在对应的席位上标注", async () => {
+    await runCouncil();
+
+    const gaps = (await screen.findByRole("region", { name: "还缺人的题" })) as HTMLElement;
+    expect(within(gaps).getByText("还缺人的题 · 2 道")).toBeInTheDocument();
+    expect(within(gaps).getByText("术 · 具体怎么做")).toBeInTheDocument();
+    expect(within(gaps).getByText("势 · 现在是不是时候")).toBeInTheDocument();
+    expect(within(gaps).getByText(/换一批时会优先给这几道题补人/)).toBeInTheDocument();
+
+    // 圆桌上对应的席位也要标出来，颜色之外还有文字标记。
+    const marked = Array.from(document.querySelectorAll('.seat[data-gap="true"]'));
+    expect(marked).toHaveLength(2);
+    for (const seat of marked) {
+      expect(seat).toHaveTextContent("这一题还缺人");
+    }
+  });
+
   it("锁定的席位在换批后仍留在名单里", async () => {
     await runCouncil();
     const firstPin = screen.getAllByRole("button", { name: "锁定" })[0]!;

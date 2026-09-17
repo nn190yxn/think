@@ -48,7 +48,8 @@ describe("预览数据集", () => {
     for (const strategy of ["steady", "clash", "serendipity"] as const) {
       const selection = demoSelection(strategy);
       expect(selection.layers, `${strategy} 应覆盖六层`).toHaveLength(6);
-      expect(selection.gaps).toEqual([]);
+      // 「术」与「势」各只有一位大师，凑不出同题的第二人，始终是缺口题。
+      expect(selection.gaps, `${strategy} 的缺口题`).toEqual(["shu", "shi"]);
       for (const seat of selection.seats) {
         expect(seat.layers, `${seat.name} 应声明层次 ${seat.layer}`).toContain(seat.layer);
       }

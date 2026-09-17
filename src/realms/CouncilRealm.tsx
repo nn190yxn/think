@@ -70,6 +70,7 @@ export function CouncilRealm({
   const [pinned, setPinned] = useState<readonly string[]>([]);
   const [session, setSession] = useState<CouncilSessionView | null>(null);
   const [seats, setSeats] = useState<readonly CouncilSeat[]>([]);
+  const [gaps, setGaps] = useState<readonly LayerKey[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [outcome, setOutcome] = useState<CouncilOutcome | null>(null);
   const [recorded, setRecorded] = useState<string | null>(null);
@@ -130,6 +131,7 @@ export function CouncilRealm({
         setSession(detail.session);
         setQuestion(detail.session.question);
         setSeats([]);
+        setGaps([]);
         setPhase("idle");
         setOutcome(null);
         setConclusion(null);
@@ -315,6 +317,7 @@ export function CouncilRealm({
       setConclusion(null);
       setSources([]);
       setSeats([]);
+      setGaps([]);
       await loadSpeech(detail.session.id);
       const rotation =
         detail.panels.length > 0
@@ -342,6 +345,7 @@ export function CouncilRealm({
     setSources([]);
     setEchoes([]);
     setSeats([]);
+    setGaps([]);
     setPhase("selecting");
     try {
       // 已载入的会话若仍是同一议题，直接复用，避免重复建会话。
@@ -361,6 +365,7 @@ export function CouncilRealm({
         pinned,
       });
       setSeats(selected.seats);
+      setGaps(selected.gaps);
       setPhase("running");
       const result = await client.call("council_run", { sessionId: active.id });
       setOutcome(result);
@@ -411,6 +416,7 @@ export function CouncilRealm({
         pinned,
       });
       setSeats(selected.seats);
+      setGaps(selected.gaps);
       setPhase("idle");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "换批未能完成");
@@ -633,6 +639,7 @@ export function CouncilRealm({
                   className="seat"
                   data-layer={slot.layer}
                   data-filled={seat ? "true" : "false"}
+                  data-gap={gaps.includes(slot.layer) ? "true" : "false"}
                   style={{ "--angle": `${slot.angle}deg` } as CSSProperties}
                 >
                   <span className="seat__sigil">
@@ -641,6 +648,9 @@ export function CouncilRealm({
                   <span className="seat__layer">{layer.name}</span>
                   <span className="seat__name">{seat?.name ?? "待选角"}</span>
                   <span className="seat__question">{layer.question}</span>
+                  {gaps.includes(slot.layer) ? (
+                    <span className="seat__gap">这一题还缺人</span>
+                  ) : null}
                   {seat ? <span className="seat__domain">{seat.domain}</span> : null}
                   {seat ? (
                     <>
@@ -667,6 +677,30 @@ export function CouncilRealm({
             </p>
           </div>
         </div>
+
+        {gaps.length > 0 ? (
+          <section className="council__gaps" aria-label="还缺人的题">
+            <h3 className="section-head">还缺人的题 · {gaps.length} 道</h3>
+            <p className="council__note">
+              可能这一轮没人在这一题上说得上话，也可能能谈这一题的人还不到两位，凑不成一次对谈。换一批时会优先给这几道题补人。
+            </p>
+            <ul className="council__gap-list">
+              {gaps.map((layer) => {
+                const meta = layerOf(layer);
+                return (
+                  <li key={layer} className="council__gap" data-layer={layer}>
+                    <span aria-hidden="true">
+                      <LayerGlyph glyph={meta.glyph} size={12} />
+                    </span>
+                    <span className="council__gap-name">
+                      {meta.name} · {meta.question}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
 
         {error ? (
           <p className="council__note" data-tone="warn">
