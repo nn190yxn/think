@@ -12,7 +12,7 @@ use crate::master::{Layer, LAYER_ORDER};
 
 use super::pairings;
 use super::{
-    Candidate, CandidatePool, Selection, Strategy, DEFAULT_PANEL_SIZE, MAX_PANEL_SIZE,
+    Candidate, CandidatePool, SeatRef, Selection, Strategy, DEFAULT_PANEL_SIZE, MAX_PANEL_SIZE,
     MIN_PANEL_SIZE,
 };
 
@@ -25,6 +25,8 @@ pub struct SelectionRequest<'a> {
     pub pinned: &'a [String],
     /// 换批时排除的大师，保留席位不受此影响。
     pub exclude: &'a [String],
+    /// 上一轮阵容的席位指派。换批时用它知道每一题上一任是谁，优先换入立场不同的人。
+    pub previous: &'a [SeatRef],
 }
 
 impl<'a> SelectionRequest<'a> {
@@ -34,11 +36,21 @@ impl<'a> SelectionRequest<'a> {
             size: DEFAULT_PANEL_SIZE,
             pinned: &[],
             exclude: &[],
+            previous: &[],
         }
     }
 }
 
-/// 碰撞策略下，候选与已入席者之间的对立度之和。
+/// 排序所需的全部上下文：策略、对立度表与已入席者。
+struct RankContext<'a> {
+    strategy: Strategy,
+    pair_map: &'a BTreeMap<(String, String), f64>,
+    layer_map: &'a BTreeMap<(String, String), BTreeMap<Layer, f64>>,
+    previous: &'a BTreeMap<Layer, String>,
+    selected: &'a [String],
+}
+
+/// 碰撞策略下，候选与已入席者之间的整体对立度之和。
 fn opposition_to_selected(
     pair_map: &BTreeMap<(String, String), f64>,
     candidate: &Candidate,
@@ -50,23 +62,33 @@ fn opposition_to_selected(
         .sum()
 }
 
-/// 策略下的候选排序分。碰撞策略在已有席位时改用与席位的对立度。
-fn rank_score(
-    strategy: Strategy,
-    pair_map: &BTreeMap<(String, String), f64>,
+/// 某题的现任发言者与该候选的同题对立度。
+fn layer_opposition_to_previous(
+    ctx: &RankContext<'_>,
     candidate: &Candidate,
-    selected: &[String],
-) -> f64 {
-    match strategy {
+    layer: Layer,
+) -> Option<f64> {
+    let previous = ctx.previous.get(&layer)?;
+    pairings::mutual_layer(ctx.layer_map, &candidate.master_id, previous, layer)
+}
+
+/// 策略下的候选排序分。
+///
+/// 碰撞策略在补某一题时，优先选在该题上与上一任立场不同的人；
+/// 没有上一任可参照时，退回与已入席者的整体对立度。
+fn rank_score(ctx: &RankContext<'_>, candidate: &Candidate, layer: Option<Layer>) -> f64 {
+    match ctx.strategy {
         Strategy::Steady => candidate.relevance,
         Strategy::Serendipity => candidate.domain_distance,
-        Strategy::Clash => {
-            if selected.is_empty() {
-                candidate.opposition
-            } else {
-                opposition_to_selected(pair_map, candidate, selected)
-            }
-        }
+        Strategy::Clash => layer
+            .and_then(|layer| layer_opposition_to_previous(ctx, candidate, layer))
+            .unwrap_or_else(|| {
+                if ctx.selected.is_empty() {
+                    candidate.opposition
+                } else {
+                    opposition_to_selected(ctx.pair_map, candidate, ctx.selected)
+                }
+            }),
     }
 }
 
@@ -77,6 +99,7 @@ pub fn select_panel(
     request: &SelectionRequest<'_>,
 ) -> CoreResult<Selection> {
     let pair_map = pairings::load(conn)?;
+    let layer_map = pairings::load_by_layer(conn)?;
     let size = if request.size == 0 {
         DEFAULT_PANEL_SIZE
     } else {
@@ -89,6 +112,12 @@ pub fn select_panel(
         .map(|candidate| (candidate.master_id.as_str(), candidate))
         .collect();
     let excluded: BTreeSet<&str> = request.exclude.iter().map(String::as_str).collect();
+    // 上一轮每题的发言者，供碰撞策略在补该题时找立场不同的人。
+    let previous: BTreeMap<Layer, String> = request
+        .previous
+        .iter()
+        .map(|seat| (seat.layer, seat.master_id.clone()))
+        .collect();
 
     let mut seats = Vec::new();
     let mut selected: Vec<String> = Vec::new();
@@ -108,11 +137,16 @@ pub fn select_panel(
                 let layer = super::primary_layer(&candidate.layers);
                 covered.insert(layer);
                 seats.push(make_seat(
+                    &RankContext {
+                        strategy: request.strategy,
+                        pair_map: &pair_map,
+                        layer_map: &layer_map,
+                        previous: &previous,
+                        selected: &selected[..selected.len() - 1],
+                    },
                     candidate,
                     layer,
-                    request.strategy,
-                    &pair_map,
-                    &[],
+                    Some(layer),
                     true,
                 ));
             }
@@ -142,12 +176,17 @@ pub fn select_panel(
                 .collect();
             indexes.sort_by(|left, right| {
                 compare(
-                    &pair_map,
-                    &selected,
-                    request.strategy,
+                    &RankContext {
+                        strategy: request.strategy,
+                        pair_map: &pair_map,
+                        layer_map: &layer_map,
+                        previous: &previous,
+                        selected: &selected,
+                    },
                     &excluded,
                     available[*left],
                     available[*right],
+                    Some(*layer),
                 )
             });
             indexes
@@ -181,11 +220,16 @@ pub fn select_panel(
             selected.push(candidate.master_id.clone());
             covered.insert(*layer);
             seats.push(make_seat(
+                &RankContext {
+                    strategy: request.strategy,
+                    pair_map: &pair_map,
+                    layer_map: &layer_map,
+                    previous: &previous,
+                    selected: &selected[..selected.len() - 1],
+                },
                 candidate,
                 *layer,
-                request.strategy,
-                &pair_map,
-                &selected[..selected.len() - 1],
+                Some(*layer),
                 false,
             ));
         }
@@ -199,12 +243,17 @@ pub fn select_panel(
             .filter(|candidate| !selected_ids.contains(&candidate.master_id))
             .min_by(|left, right| {
                 compare(
-                    &pair_map,
-                    &selected,
-                    request.strategy,
+                    &RankContext {
+                        strategy: request.strategy,
+                        pair_map: &pair_map,
+                        layer_map: &layer_map,
+                        previous: &previous,
+                        selected: &selected,
+                    },
                     &excluded,
                     left,
                     right,
+                    None,
                 )
             });
         match best {
@@ -214,11 +263,16 @@ pub fn select_panel(
                 let layer = super::primary_layer(&candidate.layers);
                 covered.insert(layer);
                 seats.push(make_seat(
+                    &RankContext {
+                        strategy: request.strategy,
+                        pair_map: &pair_map,
+                        layer_map: &layer_map,
+                        previous: &previous,
+                        selected: &selected[..selected.len() - 1],
+                    },
                     candidate,
                     layer,
-                    request.strategy,
-                    &pair_map,
-                    &selected[..selected.len() - 1],
+                    None,
                     false,
                 ));
             }
@@ -228,10 +282,20 @@ pub fn select_panel(
 
     let layers: Vec<Layer> = covered.iter().copied().collect();
 
+    // 缺口题：没有席位站上去的题，以及全池里能站上这一题的人不足两位、
+    // 注定无法形成同题对立的题。
     let gaps: Vec<Layer> = LAYER_ORDER
         .iter()
         .copied()
-        .filter(|layer| !layers.contains(layer))
+        .filter(|layer| {
+            !layers.contains(layer)
+                || pool
+                    .candidates
+                    .iter()
+                    .filter(|candidate| candidate.layers.contains(layer))
+                    .count()
+                    < 2
+        })
         .collect();
 
     Ok(Selection {
@@ -249,12 +313,11 @@ const EXCLUSION_PENALTY: f64 = 1_000_000.0;
 
 /// 排序比较：分数高者优先，同分按 id 升序，保证确定性。
 fn compare(
-    pair_map: &BTreeMap<(String, String), f64>,
-    selected: &[String],
-    strategy: Strategy,
+    ctx: &RankContext<'_>,
     excluded: &BTreeSet<&str>,
     left: &Candidate,
     right: &Candidate,
+    layer: Option<Layer>,
 ) -> std::cmp::Ordering {
     let penalty = |candidate: &Candidate| {
         if excluded.contains(candidate.master_id.as_str()) {
@@ -263,8 +326,8 @@ fn compare(
             0.0
         }
     };
-    let left_score = rank_score(strategy, pair_map, left, selected) - penalty(left);
-    let right_score = rank_score(strategy, pair_map, right, selected) - penalty(right);
+    let left_score = rank_score(ctx, left, layer) - penalty(left);
+    let right_score = rank_score(ctx, right, layer) - penalty(right);
     right_score
         .partial_cmp(&left_score)
         .unwrap_or(std::cmp::Ordering::Equal)
@@ -304,11 +367,10 @@ fn augment(
 }
 
 fn make_seat(
+    ctx: &RankContext<'_>,
     candidate: &Candidate,
     layer: Layer,
-    strategy: Strategy,
-    pair_map: &BTreeMap<(String, String), f64>,
-    selected: &[String],
+    ranking_layer: Option<Layer>,
     pinned: bool,
 ) -> super::Seat {
     super::Seat {
@@ -317,7 +379,7 @@ fn make_seat(
         domain: candidate.domain.clone(),
         layers: candidate.layers.clone(),
         layer,
-        score: rank_score(strategy, pair_map, candidate, selected),
+        score: rank_score(ctx, candidate, ranking_layer),
         pinned,
     }
 }

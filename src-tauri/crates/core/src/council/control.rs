@@ -7,7 +7,7 @@ use rusqlite::Connection;
 
 use crate::error::CoreResult;
 
-use super::{repo, SessionView};
+use super::{repo, DivergenceView, SessionView};
 
 /// 被取消的会话状态。
 pub const STATUS_CANCELLED: &str = "cancelled";
@@ -39,7 +39,7 @@ pub fn mark_cancelled(
     conn: &Connection,
     session_id: &str,
     conclusion: &str,
-    divergences: &[String],
+    divergences: &[DivergenceView],
 ) -> CoreResult<()> {
     repo::mark_cancelled(conn, session_id, conclusion, divergences)
 }

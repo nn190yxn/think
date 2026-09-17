@@ -683,8 +683,11 @@ export function CouncilRealm({
             {outcome.divergences.length > 0 ? (
               <ul className="beads" aria-label="主要分歧">
                 {outcome.divergences.map((item) => (
-                  <li key={item} className="bead">
-                    {item}
+                  <li key={item.text} className="bead" data-layer={item.layer}>
+                    <span className="bead__layer">
+                      {layerOf(item.layer).name} · {layerOf(item.layer).question}
+                    </span>
+                    {item.text}
                   </li>
                 ))}
               </ul>

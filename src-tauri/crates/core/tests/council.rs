@@ -4,12 +4,13 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 
 use thought_forge_core::council::{
-    orchestrator, pairings, pool, repo, select, speech, CandidatePool, Strategy,
+    orchestrator, pairings, pool, repo, scoring, select, speech, CandidatePool, DivergenceView,
+    SeatRef, Strategy,
 };
 use thought_forge_core::connector::{service::Retrieval, SearchHit, SearchProvider};
 use thought_forge_core::db::{self, migrations};
 use thought_forge_core::llm::{ModelClient, ModelRequest, ModelResponse, RetryPolicy};
-use thought_forge_core::master::repo as masters;
+use thought_forge_core::master::{repo as masters, Layer};
 use thought_forge_core::{CoreError, CoreResult};
 
 /// 脚本化模型客户端：记录每一次请求，按大师名生成可预测的答案。
@@ -73,6 +74,15 @@ fn seed_root() -> PathBuf {
 fn seeded_db() -> rusqlite::Connection {
     let mut conn = db::open_in_memory().expect("内存库可打开");
     migrations::apply_all(&mut conn).expect("迁移可执行");
+    for dir in seed_dirs() {
+        masters::install(&mut conn, &dir).expect("种子包可安装");
+    }
+    pairings::recompute(&conn).expect("对立度可重算");
+    conn
+}
+
+/// 按 id 排序的种子包目录，供安装测试挑选前两个。
+fn seed_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(seed_root())
         .expect("种子目录应存在")
         .filter_map(|entry| entry.ok())
@@ -80,11 +90,7 @@ fn seeded_db() -> rusqlite::Connection {
         .filter(|path| path.join("master.json").is_file())
         .collect();
     dirs.sort();
-    for dir in dirs {
-        masters::install(&mut conn, &dir).expect("种子包可安装");
-    }
-    pairings::recompute(&conn).expect("对立度可重算");
-    conn
+    dirs
 }
 
 fn question() -> &'static str {
@@ -158,6 +164,57 @@ fn build_pool(conn: &rusqlite::Connection) -> CandidatePool {
     .expect("候选池可构建")
 }
 
+/// 只声明「法」这一题、单元文本可控的大师，用来验证同题对立影响选角。
+fn install_fa_master(
+    conn: &mut rusqlite::Connection,
+    id: &str,
+    mechanism: &str,
+) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let manifest = serde_json::json!({
+        "format": "thought-forge.master-pack",
+        "formatVersion": 1,
+        "id": id,
+        "name": format!("文本大师{id}"),
+        "domain": "通用判断",
+        "layers": ["fa"],
+        "version": 1,
+        "summary": "同题对立测试用",
+        "style": "直接",
+        "blindSpots": "只谈规律",
+        "note": "测试用",
+        "units": [{
+            "title": format!("判断{id}"),
+            "layer": "fa",
+            "triggerCondition": "当需要判断一件事的规律时",
+            "steps": ["看动机", "看边界"],
+            "mechanism": mechanism,
+            "boundary": "只适用于规律判断",
+            "evidence": [{
+                "corpusRef": "corpus/notes.md",
+                "excerpt": "笔记",
+                "location": "全篇"
+            }]
+        }],
+        "corpus": [{
+            "ref": "corpus/notes.md",
+            "kind": "book",
+            "title": "文本笔记",
+            "locationHint": "全篇"
+        }]
+    });
+    std::fs::write(
+        dir.path().join("master.json"),
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    let corpus_dir = dir.path().join("corpus");
+    std::fs::create_dir_all(&corpus_dir).unwrap();
+    std::fs::write(corpus_dir.join("notes.md"), "笔记。\n").unwrap();
+    masters::install(conn, dir.path()).expect("文本大师可安装");
+    dir
+}
+
 #[test]
 fn pairings_are_precomputed_for_every_master_pair() {
     let conn = seeded_db();
@@ -169,6 +226,55 @@ fn pairings_are_precomputed_for_every_master_pair() {
 }
 
 #[test]
+fn installing_a_master_recomputes_pairings_without_extra_calls() {
+    let mut conn = db::open_in_memory().expect("内存库可打开");
+    migrations::apply_all(&mut conn).expect("迁移可执行");
+    let packs = seed_dirs();
+    // 只装两个包、不手动重算：安装本身就应把对立度算好。
+    masters::install(&mut conn, &packs[0]).expect("安装成功");
+    masters::install(&mut conn, &packs[1]).expect("安装成功");
+
+    let map = pairings::load(&conn).expect("可读取对立度");
+    assert_eq!(map.len(), 1, "两位大师应产生一对对立度");
+}
+
+#[test]
+fn layer_pairings_cover_every_pair_and_question() {
+    let conn = seeded_db();
+    let map = pairings::load_by_layer(&conn).expect("可读取同题对立度");
+    assert_eq!(map.len(), 15, "六位大师共 15 对");
+    for by_layer in map.values() {
+        assert_eq!(by_layer.len(), 6, "每一对都要有六题的对立度");
+        for score in by_layer.values() {
+            assert!(*score >= 0.0 && *score <= 1.0, "对立度应落在 0 到 1 之间");
+        }
+    }
+    // 同一对大师在任一题上的对立度与查询方向无关。
+    for layer in thought_forge_core::master::LAYER_ORDER {
+        let forward = pairings::mutual_layer(&map, "charlie-munger", "naval-ravikant", layer);
+        let backward = pairings::mutual_layer(&map, "naval-ravikant", "charlie-munger", layer);
+        assert_eq!(forward, backward, "{layer:?} 上的对立度应对称");
+        assert!(forward.is_some(), "{layer:?} 上的对立度应已预计算");
+    }
+}
+
+#[test]
+fn same_question_opposition_uses_only_that_questions_text() {
+    let layers = [Layer::Dao];
+    let same = scoring::tokens("先看动机，再看边界");
+    let alike = scoring::tokens("先看动机，再看边界");
+    let different = scoring::tokens("先算代价，再定胜负条件");
+
+    let close = scoring::layer_opposition(&same, &layers, &alike, &layers);
+    let far = scoring::layer_opposition(&same, &layers, &different, &layers);
+    assert!(
+        close < far,
+        "同一题内说法接近的对立度应低于说法迥异的一对：{close} vs {far}"
+    );
+    assert!((0.0..=1.0).contains(&close) && (0.0..=1.0).contains(&far));
+}
+
+#[test]
 fn default_selection_covers_all_six_layers() {
     let conn = seeded_db();
     let pool = build_pool(&conn);
@@ -177,7 +283,181 @@ fn default_selection_covers_all_six_layers() {
 
     assert_eq!(plan.seats.len(), 6, "默认六席");
     assert_eq!(plan.layers.len(), 6, "六层各取一位");
-    assert!(plan.gaps.is_empty(), "种子库下不应有空缺");
+    // 种子库里术与势各只有一位大师，站得上去但凑不出同题对立的第二人，
+    // 因此这两题记为缺口；其余四题在池中都有至少两位可用大师。
+    assert_eq!(
+        plan.gaps,
+        vec![Layer::Shu, Layer::Shi],
+        "缺口题应按道法术气器势排序"
+    );
+}
+
+#[test]
+fn a_richer_pool_has_no_gap_questions() {
+    let mut conn = seeded_db();
+    let _dirs = install_extra_masters(&mut conn, 6);
+    let pool = build_pool(&conn);
+    let plan = select::select_panel(&conn, &pool, &select::SelectionRequest::new(Strategy::Steady))
+        .expect("可完成选角");
+
+    assert!(plan.gaps.is_empty(), "每题都有两位以上候选时不应有缺口题");
+}
+
+#[test]
+fn rotation_does_not_add_gap_questions() {
+    let mut conn = seeded_db();
+    let initial = select::select_panel(
+        &conn,
+        &build_pool(&conn),
+        &select::SelectionRequest::new(Strategy::Steady),
+    )
+    .expect("首次选角");
+    assert_eq!(initial.gaps, vec![Layer::Shu, Layer::Shi], "种子库的缺口题");
+
+    let previous: Vec<SeatRef> = initial
+        .seats
+        .iter()
+        .map(|seat| SeatRef {
+            master_id: seat.master_id.clone(),
+            layer: seat.layer,
+        })
+        .collect();
+    let current = initial.master_ids();
+
+    // 补入覆盖全部六层的候选人后再换批，缺口题只应减少。
+    let _extra = install_extra_masters(&mut conn, 12);
+    let rotated = select::select_panel(
+        &conn,
+        &build_pool(&conn),
+        &select::SelectionRequest {
+            strategy: Strategy::Clash,
+            size: 6,
+            pinned: &[],
+            exclude: &current,
+            previous: &previous,
+        },
+    )
+    .expect("换批选角");
+
+    for gap in &rotated.gaps {
+        assert!(
+            initial.gaps.contains(gap),
+            "换批不应新增缺口题：{:?} 到 {:?}",
+            initial.gaps,
+            rotated.gaps
+        );
+    }
+    assert!(
+        rotated.gaps.is_empty(),
+        "池里每题都有两位以上候选后不应再有缺口题"
+    );
+}
+
+#[test]
+fn rotation_prefers_a_different_voice_on_the_same_question() {
+    let mut conn = db::open_in_memory().expect("内存库可打开");
+    migrations::apply_all(&mut conn).expect("迁移可执行");
+    // 两位在同一题上说法几乎一致，第三位明显不同；上一任是第一位。
+    let _same = install_fa_master(&mut conn, "same-1", "先看动机，再看边界，动机优先");
+    let _alike = install_fa_master(&mut conn, "same-2", "先看动机，再看边界，动机优先");
+    let _different = install_fa_master(&mut conn, "different", "先算代价，再定胜负条件，代价优先");
+    let pool = build_pool(&conn);
+
+    let previous = vec![SeatRef {
+        master_id: "same-1".to_string(),
+        layer: Layer::Fa,
+    }];
+    let plan = select::select_panel(
+        &conn,
+        &pool,
+        &select::SelectionRequest {
+            strategy: Strategy::Clash,
+            size: 4,
+            pinned: &[],
+            exclude: &[],
+            previous: &previous,
+        },
+    )
+    .expect("可完成换批");
+
+    let fa = plan
+        .seats
+        .iter()
+        .find(|seat| seat.layer == Layer::Fa)
+        .expect("法这一题应有人");
+    assert_eq!(
+        fa.master_id, "different",
+        "同一题应优先换入与上一任立场不同的人"
+    );
+}
+
+#[test]
+fn divergences_name_the_question_they_belong_to() {
+    let answers = vec![
+        orchestrator::SeatAnswer {
+            name: "甲".to_string(),
+            content: "先看动机与边界，再谈取舍与时机".to_string(),
+            layer: Layer::Dao,
+        },
+        orchestrator::SeatAnswer {
+            name: "乙".to_string(),
+            content: "先算代价与胜负，再谈动机是否成立".to_string(),
+            layer: Layer::Dao,
+        },
+        orchestrator::SeatAnswer {
+            name: "丙".to_string(),
+            content: "先把现金流做正，再谈扩张节奏".to_string(),
+            layer: Layer::Shu,
+        },
+    ];
+
+    let divergences = orchestrator::derive_divergences(&answers);
+    assert!(!divergences.is_empty(), "有两位以上发言者应给出分歧");
+    // 道这一题上有两位发言者，应有一条标注在道上的同题对立。
+    let same_question = divergences
+        .iter()
+        .find(|item| item.layer == Layer::Dao)
+        .expect("道这一题应有一条同题分歧");
+    assert!(
+        same_question.text.contains('甲') && same_question.text.contains('乙'),
+        "同题分歧文字应保留双方名字：{}",
+        same_question.text
+    );
+    // 其余条目只能是某位席位按自己那一题归档的突出分歧。
+    assert!(
+        divergences
+            .iter()
+            .filter(|item| item.layer != Layer::Dao)
+            .all(|item| item.layer == Layer::Shu),
+        "非道上的条目应归档到该席位自己的题：{divergences:?}"
+    );
+}
+
+#[test]
+fn persisted_divergences_keep_their_question_and_old_rows_still_read() {
+    let conn = seeded_db();
+    let pool = build_pool(&conn);
+    let session =
+        repo::create_session(&conn, question(), &pool.domains, &[], Strategy::Steady).unwrap();
+    let written = [DivergenceView {
+        layer: Layer::Qi,
+        text: "两种心力的坚持方式各有道理".to_string(),
+    }];
+    repo::finish_session(&conn, &session, "先验证再决定", &written).unwrap();
+
+    let view = repo::get_session(&conn, &session).unwrap();
+    assert_eq!(view.divergences, written, "分歧的题与文字应原样读回");
+
+    // 模拟升级前写入的纯文本数组：仍应可读，题号回退到「法」。
+    conn.execute(
+        "UPDATE council_sessions SET divergences_json = '[\"升级前的分歧\"]' WHERE id = ?1",
+        [session.as_str()],
+    )
+    .unwrap();
+    let legacy = repo::get_session(&conn, &session).unwrap();
+    assert_eq!(legacy.divergences.len(), 1);
+    assert_eq!(legacy.divergences[0].text, "升级前的分歧");
+    assert_eq!(legacy.divergences[0].layer, Layer::Fa);
 }
 
 #[test]
@@ -330,6 +610,7 @@ fn pinned_seat_survives_rotation_and_rotation_keeps_coverage() {
             size: 6,
             pinned: &pinned,
             exclude: &[],
+            previous: &[],
         },
     )
     .expect("首次选角");
@@ -344,6 +625,7 @@ fn pinned_seat_survives_rotation_and_rotation_keeps_coverage() {
             size: 6,
             pinned: &pinned,
             exclude: &current,
+            previous: &[],
         },
     )
     .expect("换批选角");
@@ -479,11 +761,21 @@ fn rotation_adds_a_second_panel_without_losing_history() {
             size: 6,
             pinned: &pinned,
             exclude: &[],
+            previous: &[],
         },
     )
     .unwrap();
     repo::record_panel(&conn, &session, 0, &first, &pinned).unwrap();
 
+    // 换批时把上一轮的席位指派带上，让碰撞策略知道每题上一任是谁。
+    let previous: Vec<SeatRef> = first
+        .seats
+        .iter()
+        .map(|seat| SeatRef {
+            master_id: seat.master_id.clone(),
+            layer: seat.layer,
+        })
+        .collect();
     let rotated = select::select_panel(
         &conn,
         &pool,
@@ -492,6 +784,7 @@ fn rotation_adds_a_second_panel_without_losing_history() {
             size: 6,
             pinned: &pinned,
             exclude: &first.master_ids(),
+            previous: &previous,
         },
     )
     .unwrap();

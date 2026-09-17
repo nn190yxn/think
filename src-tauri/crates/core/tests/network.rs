@@ -1,11 +1,23 @@
 //! 思维网络：节点去重、关系对称、激活单调、时间衰减与固化幂等。
 
 use proptest::prelude::*;
-use thought_forge_core::council::{repo as council, Strategy};
+use thought_forge_core::council::{repo as council, DivergenceView, Strategy};
 use thought_forge_core::db::{self, migrations};
-use thought_forge_core::master::Layer;
+use thought_forge_core::master::{Layer, LAYER_ORDER};
 use thought_forge_core::network::repo::{self, NewNode, NewRecord, DEFAULT_GRAPH_LIMIT};
 use thought_forge_core::network::{consolidate, recorder, GraphFilter, NodeKind, Relation};
+
+/// 分歧清单的小助手：测试只关心条数与文本，题号按顺序轮流分配。
+fn splits(texts: &[String]) -> Vec<DivergenceView> {
+    texts
+        .iter()
+        .enumerate()
+        .map(|(index, text)| DivergenceView {
+            layer: LAYER_ORDER[index % LAYER_ORDER.len()],
+            text: text.clone(),
+        })
+        .collect()
+}
 
 fn db() -> rusqlite::Connection {
     let mut conn = db::open_in_memory().expect("内存库可打开");
@@ -255,8 +267,8 @@ fn finished_council(conn: &rusqlite::Connection, question: &str, conclusion: &st
         )
         .unwrap();
     }
-    council::finish_session(conn, &session, conclusion, &["扩张与收敛的先后顺序".to_string()])
-        .unwrap();
+    let splits = splits(&["扩张与收敛的先后顺序".to_string()]);
+    council::finish_session(conn, &session, conclusion, &splits).unwrap();
     session
 }
 
@@ -583,9 +595,10 @@ proptest! {
             )
             .unwrap();
         }
-        let splits: Vec<String> = (0..divergences)
+        let texts: Vec<String> = (0..divergences)
             .map(|index| format!("分歧{index}：{}", DISTINCT[index + 4]))
             .collect();
+        let splits = splits(&texts);
         council::finish_session(&conn, &session, "先收敛现金流，再按节奏扩张", &splits).unwrap();
 
         let outcome = recorder::record_session(&conn, &session).unwrap();

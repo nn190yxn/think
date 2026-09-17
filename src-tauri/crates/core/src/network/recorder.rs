@@ -95,7 +95,7 @@ pub fn record_session(conn: &Connection, session_id: &str) -> CoreResult<RecordO
 
     let mut divergence_ids = Vec::new();
     for divergence in &session.divergences {
-        let content = divergence.trim();
+        let content = divergence.text.trim();
         if content.is_empty() {
             continue;
         }
@@ -107,7 +107,8 @@ pub fn record_session(conn: &Connection, session_id: &str) -> CoreResult<RecordO
                 source_kind: SOURCE_SESSION,
                 source_ref: session_id,
                 domains: &session.domains,
-                layers: &session.layers,
+                // 分歧落在具体某一题上，节点只挂这一题，别再摊到全部层次。
+                layers: std::slice::from_ref(&divergence.layer),
             },
         )?;
         if node.node_id == judgment.node_id {

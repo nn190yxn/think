@@ -245,6 +245,9 @@ pub fn install(conn: &mut Connection, pack_dir: &Path) -> CoreResult<InstallOutc
     let version = validated.version;
     tx.commit()?;
 
+    // 单元文本变了，对立度必须跟着重算，否则会诊仍按旧文本选人。
+    crate::council::pairings::recompute(conn)?;
+
     Ok(InstallOutcome {
         master_id,
         version,

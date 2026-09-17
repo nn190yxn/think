@@ -251,6 +251,12 @@ export interface CouncilTurn {
   readonly createdAt: string;
 }
 
+/** 一条还没谈拢的地方：分歧落在哪一题，以及分歧本身。 */
+export interface DivergenceView {
+  readonly layer: LayerKey;
+  readonly text: string;
+}
+
 export interface CouncilSessionView {
   readonly id: string;
   readonly question: string;
@@ -259,7 +265,7 @@ export interface CouncilSessionView {
   readonly strategy: CouncilStrategy;
   readonly status: string;
   readonly conclusion: string;
-  readonly divergences: readonly string[];
+  readonly divergences: readonly DivergenceView[];
   readonly rotationCount: number;
   readonly turnCount: number;
   /** 追问会话的母会话标识；普通会诊为 null。 */
@@ -366,7 +372,7 @@ export interface CouncilOutcome {
   readonly answered: number;
   readonly failed: number;
   readonly conclusion: string;
-  readonly divergences: readonly string[];
+  readonly divergences: readonly DivergenceView[];
   readonly rounds: number;
   readonly metrics: readonly CouncilRoundMetric[];
 }

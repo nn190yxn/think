@@ -1,6 +1,6 @@
 //! 候选池：把大师库整理成带三项评分的候选集合。
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::Connection;
 
@@ -18,6 +18,8 @@ pub struct MasterText {
     pub domain: String,
     pub layers: Vec<Layer>,
     pub tokens: BTreeSet<String>,
+    /// 按题（层次）分组的单元文本指纹，供同题对立度使用。
+    pub layer_tokens: BTreeMap<Layer, BTreeSet<String>>,
 }
 
 /// 汇总大师身份与当前版本技能单元文本。
@@ -58,7 +60,42 @@ pub fn load_master_texts(conn: &Connection) -> CoreResult<Vec<MasterText>> {
             domain,
             layers,
             tokens: scoring::tokens(&text),
+            layer_tokens: BTreeMap::new(),
         });
+    }
+
+    // 单元按题分组：同一题下只比较这一题的用词，跨题内容不参与。
+    let mut stmt = conn.prepare(
+        "SELECT u.master_id, u.layer, u.title || ' ' || u.mechanism || ' ' || u.boundary
+           FROM master_units u
+           JOIN masters m ON m.id = u.master_id
+          WHERE u.version = m.current_version
+          ORDER BY u.master_id ASC, u.ordinal ASC",
+    )?;
+    let unit_rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut by_master: BTreeMap<String, BTreeMap<Layer, String>> = BTreeMap::new();
+    for row in unit_rows {
+        let (master_id, layer_name, text) = row?;
+        let Some(layer) = Layer::parse(&layer_name) else {
+            continue;
+        };
+        let entry = by_master.entry(master_id).or_default().entry(layer).or_default();
+        entry.push(' ');
+        entry.push_str(&text);
+    }
+    for master in &mut masters {
+        if let Some(units) = by_master.remove(&master.id) {
+            master.layer_tokens = units
+                .into_iter()
+                .map(|(layer, text)| (layer, scoring::tokens(&text)))
+                .collect();
+        }
     }
     Ok(masters)
 }

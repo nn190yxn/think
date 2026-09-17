@@ -152,6 +152,14 @@ pub fn primary_layer(layers: &[Layer]) -> Layer {
         .unwrap_or(Layer::Fa)
 }
 
+/// 一条未谈拢的地方：分歧落在哪一题，以及分歧本身的人话描述。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DivergenceView {
+    pub layer: Layer,
+    pub text: String,
+}
+
 /// 会诊阵容的一次轮次。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -207,7 +215,8 @@ pub struct SessionView {
     pub strategy: Strategy,
     pub status: String,
     pub conclusion: String,
-    pub divergences: Vec<String>,
+    /// 未谈拢的地方，每条标明它属于哪一题。
+    pub divergences: Vec<DivergenceView>,
     pub rotation_count: i64,
     pub turn_count: i64,
     /// 追问会话的母会话标识；普通会诊为空。
@@ -291,7 +300,7 @@ pub struct CouncilOutcome {
     pub answered: usize,
     pub failed: usize,
     pub conclusion: String,
-    pub divergences: Vec<String>,
+    pub divergences: Vec<DivergenceView>,
     /// 实际执行的讨论轮次数，含作答轮，不含收敛裁决。
     pub rounds: usize,
     pub metrics: Vec<RoundMetric>,

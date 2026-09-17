@@ -80,12 +80,35 @@ pub fn opposition(
     b_layers: &[Layer],
 ) -> f64 {
     let vocab = 1.0 - overlap(a_tokens, b_tokens);
+    0.6 * vocab + 0.4 * layer_gap(a_layers, b_layers)
+}
+
+/// 层次集合差异：Jaccard 距离。两位大师随身带的框架越不同，值越大。
+pub fn layer_gap(a_layers: &[Layer], b_layers: &[Layer]) -> f64 {
     let a_set: BTreeSet<u8> = a_layers.iter().map(|layer| *layer as u8).collect();
     let b_set: BTreeSet<u8> = b_layers.iter().map(|layer| *layer as u8).collect();
     let union = a_set.union(&b_set).count() as f64;
     let inter = a_set.intersection(&b_set).count() as f64;
-    let layer_gap = if union == 0.0 { 0.0 } else { 1.0 - inter / union };
-    0.6 * vocab + 0.4 * layer_gap
+    if union == 0.0 {
+        0.0
+    } else {
+        1.0 - inter / union
+    }
+}
+
+/// 同题对立度：只用两位大师在该题下的单元文本比较用词，并保留层次框架差异作为立场信号。
+/// 其中一方在该题没有积累时退回整体对立度，避免把「没积累」误判成「最对立」。
+pub fn layer_opposition(
+    a_tokens: &BTreeSet<String>,
+    a_layers: &[Layer],
+    b_tokens: &BTreeSet<String>,
+    b_layers: &[Layer],
+) -> f64 {
+    if a_tokens.is_empty() || b_tokens.is_empty() {
+        return opposition(a_tokens, a_layers, b_tokens, b_layers);
+    }
+    let vocab = 1.0 - overlap(a_tokens, b_tokens);
+    0.7 * vocab + 0.3 * layer_gap(a_layers, b_layers)
 }
 
 /// 领域邻接图：共享至少一个层次的两个领域视为相邻。

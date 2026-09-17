@@ -573,11 +573,15 @@ pub fn council_select(
         let session = council_repo::get_session(&conn, &session_id)?;
         let (pinned, size) = reserve_self_seat(&conn, pinned, size, session.self_seat_included)?;
         let exclude = self_exclusion(&session);
+        let previous = council_repo::latest_panel(&conn, &session_id)?
+            .map(|panel| panel.seats)
+            .unwrap_or_default();
         let request = select::SelectionRequest {
             strategy: parsed,
             size,
             pinned: &pinned,
             exclude: &exclude,
+            previous: &previous,
         };
         let selection = select_selection(&conn, &session.question, &request)?;
         let rotation = council_repo::latest_rotation(&conn, &session_id)?.unwrap_or(-1) + 1;
@@ -633,6 +637,7 @@ pub fn council_rotate(
             size,
             pinned: &pinned,
             exclude: &exclude,
+            previous: previous.as_ref().map(|panel| panel.seats.as_slice()).unwrap_or(&[]),
         };
         let selection = select_selection(&conn, &session.question, &request)?;
         let rotation = council_repo::latest_rotation(&conn, &session_id)?.unwrap_or(-1) + 1;

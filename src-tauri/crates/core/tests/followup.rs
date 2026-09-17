@@ -1,7 +1,7 @@
 //! 追问会话：锚点校验、文字截断、母会话不变、阵容继承与衍生连线。
 
 use thought_forge_core::council::{
-    followup, repo, FollowUpAnchor, Seat, Selection, Strategy,
+    followup, repo, DivergenceView, FollowUpAnchor, Seat, Selection, Strategy,
 };
 use thought_forge_core::db::{self, migrations};
 use thought_forge_core::master::Layer;
@@ -40,8 +40,11 @@ fn parent_session(conn: &rusqlite::Connection) -> String {
         .expect("母会话可新建");
     repo::record_panel(conn, &id, 0, &selection(&["m-1", "m-2"]), &[])
         .expect("母会话阵容可记录");
-    repo::finish_session(conn, &id, "先验证再决定", &["两种主张各执一词".to_string()])
-        .expect("母会话可收敛");
+    let splits = [DivergenceView {
+        layer: Layer::Fa,
+        text: "两种主张各执一词".to_string(),
+    }];
+    repo::finish_session(conn, &id, "先验证再决定", &splits).expect("母会话可收敛");
     id
 }
 

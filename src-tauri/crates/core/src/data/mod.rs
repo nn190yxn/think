@@ -30,6 +30,7 @@ pub const DATA_TABLES: &[(&str, &str)] = &[
     ("connector_calls", "连接器调用审计"),
     ("connectors", "连接器配置"),
     ("master_pairings", "大师对立度"),
+    ("master_layer_pairings", "大师同题对立度"),
     ("llm_calls", "模型调用审计"),
     ("ai_platforms", "模型平台配置"),
     ("thought_edges", "思维网络连线"),

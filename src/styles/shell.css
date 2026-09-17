@@ -1317,12 +1317,27 @@
 }
 
 .bead {
+  display: grid;
+  gap: var(--sp-1);
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-md);
-  border: var(--line-w) solid color-mix(in srgb, var(--layer-shi) 55%, transparent);
-  background: color-mix(in srgb, var(--layer-shi) 10%, transparent);
-  color: var(--text-2);
+  border: var(--line-w) solid
+    color-mix(in srgb, var(--bead-layer, var(--layer-shi)) 55%, transparent);
+  background: color-mix(in srgb, var(--bead-layer, var(--layer-shi)) 10%, transparent);
+  color: var(--text-1);
   font-size: var(--fs-meta);
+}
+
+/* 每条分歧按它所属的题着色，颜色之外还有题名，色觉障碍下也能分辨。 */
+.bead[data-layer="dao"] { --bead-layer: var(--layer-dao); }
+.bead[data-layer="fa"] { --bead-layer: var(--layer-fa); }
+.bead[data-layer="shu"] { --bead-layer: var(--layer-shu); }
+.bead[data-layer="qi"] { --bead-layer: var(--layer-qi); }
+.bead[data-layer="tool"] { --bead-layer: var(--layer-tool); }
+.bead[data-layer="shi"] { --bead-layer: var(--layer-shi); }
+
+.bead__layer {
+  color: var(--text-2);
 }
 
 .divergence {
@@ -4202,6 +4217,62 @@
   margin: 0;
   color: var(--text-1);
   line-height: var(--lh-prose);
+}
+
+.conclusion__divergence-group {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.conclusion__divergence-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+}
+
+.conclusion__divergence-count {
+  margin-left: auto;
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.conclusion__divergence-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conclusion__divergence-table-wrap summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+}
+
+.conclusion__divergence-table {
+  width: 100%;
+  margin-top: var(--sp-2);
+  border-collapse: collapse;
+  font-size: var(--fs-meta);
+}
+
+.conclusion__divergence-table th,
+.conclusion__divergence-table td {
+  padding: var(--sp-2);
+  border-bottom: var(--line-w) solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  color: var(--text-1);
+}
+
+.conclusion__divergence-table th {
+  color: var(--text-2);
+  font-weight: 600;
 }
 
 .conclusion__ask {

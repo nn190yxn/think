@@ -123,6 +123,23 @@ describe("圆桌会诊", () => {
     expect(screen.getByText(/半年前的结论/)).toBeInTheDocument();
   });
 
+  it("还没谈拢的分歧按题分组，并保留表格等效视图", async () => {
+    await runCouncil();
+    await userEvent.click(await screen.findByRole("button", { name: "查看结论详情" }));
+
+    const groups = document.querySelector(".conclusion__divergences") as HTMLElement;
+    const headings = Array.from(groups.querySelectorAll(".conclusion__divergence-head")).map(
+      (node) => node.textContent,
+    );
+    expect(headings).toHaveLength(2);
+    expect(headings[0]).toContain("道 · 什么值得做");
+    expect(headings[1]).toContain("气 · 靠什么心力度过");
+
+    const table = screen.getByRole("table", { name: "还没谈拢的分歧" });
+    expect(table.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(table).toHaveTextContent("气 · 靠什么心力度过");
+  });
+
   it("可从结论发起追问并返回母会话", async () => {
     await runCouncil();
     await userEvent.click(await screen.findByRole("button", { name: "查看结论详情" }));

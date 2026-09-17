@@ -1,11 +1,25 @@
 import { DivergenceCurve } from "./DivergenceCurve";
 import { SeatSpeech } from "./SeatSpeech";
+import { LayerGlyph } from "./LayerGlyph";
 import { formatMoney, formatTime } from "../domain/labels";
+import { LAYER_KEYS, layerOf } from "../domain/layers";
 import type {
   CouncilConclusionView,
   CouncilSourceView,
+  DivergenceView,
   FollowUpAnchor,
 } from "../ipc/commands";
+import type { LayerKey } from "../domain/layers";
+
+/** 按题归拢分歧，题序固定为道法术气器势，避免同一场会诊顺序漂移。 */
+function groupByLayer(
+  divergences: readonly DivergenceView[],
+): readonly { layer: LayerKey; items: readonly DivergenceView[] }[] {
+  return LAYER_KEYS.map((layer) => ({
+    layer,
+    items: divergences.filter((item) => item.layer === layer),
+  })).filter((group) => group.items.length > 0);
+}
 
 function sentences(text: string): readonly string[] {
   return text
@@ -106,22 +120,77 @@ export function CouncilConclusion({
         {session.divergences.length === 0 ? (
           <p className="conclusion__empty">这次没有留下未决的分歧。</p>
         ) : (
-          <ul className="conclusion__divergences">
-            {session.divergences.map((item) => (
-              <li key={item} className="conclusion__divergence">
-                <span className="conclusion__divergence-text">{item}</span>
-                <button
-                  className="conclusion__ask"
-                  type="button"
-                  onClick={() =>
-                    onFollowUp({ kind: "divergence", text: item })
-                  }
-                >
-                  追问
-                </button>
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className="conclusion__divergences">
+              {groupByLayer(session.divergences).map((group) => {
+                const meta = layerOf(group.layer);
+                return (
+                  <section
+                    key={group.layer}
+                    className="conclusion__divergence-group"
+                    aria-label={`${meta.name} · ${meta.question}`}
+                  >
+                    <h4 className="conclusion__divergence-head">
+                      <span aria-hidden="true">
+                        <LayerGlyph glyph={meta.glyph} size={13} />
+                      </span>
+                      <span>
+                        {meta.name} · {meta.question}
+                      </span>
+                      <span className="conclusion__divergence-count">
+                        {group.items.length} 条
+                      </span>
+                    </h4>
+                    <ul className="conclusion__divergence-list">
+                      {group.items.map((item) => (
+                        <li key={item.text} className="conclusion__divergence">
+                          <span className="conclusion__divergence-text">
+                            {item.text}
+                          </span>
+                          <button
+                            className="conclusion__ask"
+                            type="button"
+                            onClick={() =>
+                              onFollowUp({ kind: "divergence", text: item.text })
+                            }
+                          >
+                            追问
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                );
+              })}
+            </div>
+            <details className="conclusion__divergence-table-wrap">
+              <summary>分歧清单（表格视图）</summary>
+              <table
+                className="conclusion__divergence-table"
+                aria-label="还没谈拢的分歧"
+              >
+                <thead>
+                  <tr>
+                    <th scope="col">题</th>
+                    <th scope="col">分歧</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {session.divergences.map((item) => {
+                    const meta = layerOf(item.layer);
+                    return (
+                      <tr key={item.text}>
+                        <td>
+                          {meta.name} · {meta.question}
+                        </td>
+                        <td>{item.text}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </details>
+          </>
         )}
       </section>
 

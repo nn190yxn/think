@@ -14,7 +14,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::llm::{call_model, ModelClient, ModelRequest, RetryPolicy};
 use crate::master::{repo as master_repo, Layer, MasterDetail, MasterUnitView};
 
-use super::{control, repo, CouncilOutcome, PanelView, SessionView};
+use super::{control, repo, CouncilOutcome, DivergenceView, PanelView, SessionView};
 
 const ROUND_ANSWER: i64 = 1;
 const FIRST_CROSS_ROUND: i64 = 2;
@@ -167,39 +167,61 @@ pub fn synthesis_prompt(question: &str, history: &[Vec<(String, String)>]) -> Mo
     .with_prompt_version(PROMPT_VERSION)
 }
 
-/// 由答案文本推导分歧点：挑出与其他席位差异最大的席位。
-pub fn derive_divergences(answers: &[(String, String)]) -> Vec<String> {
+/// 一位席位在本轮的作答，含它被指派到的题。
+pub struct SeatAnswer {
+    pub name: String,
+    pub content: String,
+    pub layer: Layer,
+}
+
+/// 由答案文本推导分歧点，每条都标明落在哪一题。
+///
+/// 两处来源：同一题上有两位以上发言者时的对立；以及某位席位的判断
+/// 与全场其余席位差异最大时，按它自己那一题归档的突出分歧。
+pub fn derive_divergences(answers: &[SeatAnswer]) -> Vec<DivergenceView> {
     if answers.len() < 2 {
         return Vec::new();
     }
     let token_sets: Vec<BTreeSet<String>> = answers
         .iter()
-        .map(|(_, content)| super::scoring::tokens(content))
+        .map(|answer| super::scoring::tokens(&answer.content))
         .collect();
 
     let mut divergences = Vec::new();
-    let mut worst_pair: Option<(usize, usize, f64)> = None;
-    for left in 0..answers.len() {
-        for right in (left + 1)..answers.len() {
-            let similarity = super::scoring::overlap(&token_sets[left], &token_sets[right]);
-            match worst_pair {
-                Some((_, _, current)) if current <= similarity => {}
-                _ => worst_pair = Some((left, right, similarity)),
+    for layer in crate::master::LAYER_ORDER {
+        let indexes: Vec<usize> = (0..answers.len())
+            .filter(|index| answers[*index].layer == layer)
+            .collect();
+        if indexes.len() < 2 {
+            continue;
+        }
+
+        let mut worst_pair: Option<(usize, usize, f64)> = None;
+        for (offset, left) in indexes.iter().enumerate() {
+            for right in indexes.iter().skip(offset + 1) {
+                let similarity = super::scoring::overlap(&token_sets[*left], &token_sets[*right]);
+                match worst_pair {
+                    Some((_, _, current)) if current <= similarity => {}
+                    _ => worst_pair = Some((*left, *right, similarity)),
+                }
             }
+        }
+        if let Some((left, right, similarity)) = worst_pair {
+            divergences.push(DivergenceView {
+                layer,
+                text: format!(
+                    "在同一题上，「{}」与「{}」的判断差异最大（用词重合 {:.0}%）",
+                    answers[left].name,
+                    answers[right].name,
+                    similarity * 100.0
+                ),
+            });
         }
     }
 
-    if let Some((left, right, similarity)) = worst_pair {
-        divergences.push(format!(
-            "「{}」与「{}」的判断差异最大（用词重合 {:.0}%），是本次会诊的主要分歧",
-            answers[left].0,
-            answers[right].0,
-            similarity * 100.0
-        ));
-    }
-
-    // 与其余席位平均重合度最低的一位，作为需要重点关注的少数意见。
-    if answers.len() >= 3 {
+    // 与全场其余席位平均重合度最低的一位：按它所在的题归档，
+    // 说明是哪一题的视角与全场最不一样。
+    {
         let mut outlier: Option<(usize, f64)> = None;
         for index in 0..answers.len() {
             let total: f64 = (0..answers.len())
@@ -213,11 +235,18 @@ pub fn derive_divergences(answers: &[(String, String)]) -> Vec<String> {
             }
         }
         if let Some((index, average)) = outlier {
-            divergences.push(format!(
-                "「{}」的表述与同席平均重合度最低（{:.0}%），可能是少数意见或未被理解的盲区",
-                answers[index].0,
-                average * 100.0
-            ));
+            let layer = answers[index].layer;
+            divergences.push(DivergenceView {
+                layer,
+                text: format!(
+                    "在「{} · {}」这一题上，「{}」的判断与全场其余席位差异最大\
+                     （用词重合 {:.0}%），可能是少数意见或未被理解的盲区",
+                    layer.name(),
+                    layer.question(),
+                    answers[index].name,
+                    average * 100.0
+                ),
+            });
         }
     }
 
@@ -576,8 +605,28 @@ pub fn run_council_with_judge(
     }
 
     // 分歧摘要以最后一个质询轮的发言为准，与最新判断一致。
+    // 每条分歧都要能说出落在哪一题，所以把席位被指派到的题一并带上。
     let latest = history.last().cloned().unwrap_or_else(|| answers.clone());
-    let divergences = derive_divergences(&latest);
+    let seat_answers: Vec<SeatAnswer> = latest
+        .iter()
+        .map(|(name, content)| {
+            let layer = loaded
+                .iter()
+                .find(|master| &master.name == name)
+                .map(|master| {
+                    panel
+                        .layer_of(&master.id)
+                        .unwrap_or_else(|| super::primary_layer(&master.layers))
+                })
+                .unwrap_or(Layer::Fa);
+            SeatAnswer {
+                name: name.clone(),
+                content: content.clone(),
+                layer,
+            }
+        })
+        .collect();
+    let divergences = derive_divergences(&seat_answers);
     if cancelled {
         control::mark_cancelled(conn, session_id, &conclusion, &divergences)?;
     } else {

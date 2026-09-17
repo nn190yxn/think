@@ -7,8 +7,8 @@ use crate::master::Layer;
 use crate::util::unique_id;
 
 use super::{
-    MasterHistoryEntry, PanelView, RoundMetric, SeatRef, Selection, SessionDetail, SessionView,
-    Strategy, TurnView,
+    DivergenceView, MasterHistoryEntry, PanelView, RoundMetric, SeatRef, Selection, SessionDetail,
+    SessionView, Strategy, TurnView,
 };
 
 pub(crate) fn now(conn: &Connection) -> CoreResult<String> {
@@ -35,8 +35,28 @@ fn parse_layers(raw: &str) -> Vec<Layer> {
     layers
 }
 
+fn divergences_json(divergences: &[DivergenceView]) -> String {
+    serde_json::to_string(divergences).unwrap_or_else(|_| "[]".to_string())
+}
+
 fn parse_strings(raw: &str) -> Vec<String> {
     serde_json::from_str(raw).unwrap_or_default()
+}
+
+/// 读取分歧清单。升级前的历史会话存的是纯文本数组，按「法」这一题回填，
+/// 保证旧会话仍能显示原有内容。
+fn parse_divergences(raw: &str) -> Vec<DivergenceView> {
+    if let Ok(items) = serde_json::from_str::<Vec<DivergenceView>>(raw) {
+        return items;
+    }
+    serde_json::from_str::<Vec<String>>(raw)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|text| DivergenceView {
+            layer: Layer::Fa,
+            text,
+        })
+        .collect()
 }
 
 fn seats_json(seats: &[SeatRef]) -> String {
@@ -236,13 +256,13 @@ pub fn heartbeat(conn: &Connection, session_id: &str) -> CoreResult<()> {
 }
 
 /// 取消生效：置为已取消并记录时刻，已完成的轮次全部保留。
-pub fn mark_cancelled(conn: &Connection, session_id: &str, conclusion: &str, divergences: &[String]) -> CoreResult<()> {
+pub fn mark_cancelled(conn: &Connection, session_id: &str, conclusion: &str, divergences: &[DivergenceView]) -> CoreResult<()> {
     let affected = conn.execute(
         "UPDATE council_sessions
          SET status = 'cancelled', cancelled_at = ?2, conclusion = ?3, divergences_json = ?4,
              updated_at = ?2
          WHERE id = ?1",
-        rusqlite::params![session_id, now(conn)?, conclusion, json_array(divergences)],
+        rusqlite::params![session_id, now(conn)?, conclusion, divergences_json(divergences)],
     )?;
     if affected == 0 {
         return Err(CoreError::NotFound(format!("会诊 {session_id}")));
@@ -450,14 +470,14 @@ pub fn finish_session(
     conn: &Connection,
     session_id: &str,
     conclusion: &str,
-    divergences: &[String],
+    divergences: &[DivergenceView],
 ) -> CoreResult<()> {
     let updated_at = now(conn)?;
     let affected = conn.execute(
         "UPDATE council_sessions
          SET status = 'done', conclusion = ?2, divergences_json = ?3, updated_at = ?4
          WHERE id = ?1",
-        rusqlite::params![session_id, conclusion, json_array(divergences), updated_at],
+        rusqlite::params![session_id, conclusion, divergences_json(divergences), updated_at],
     )?;
     if affected == 0 {
         return Err(CoreError::NotFound(format!("会诊 {session_id}")));
@@ -474,7 +494,7 @@ fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionView> {
         strategy: parse_strategy(&row.get::<_, String>(4)?),
         status: row.get(5)?,
         conclusion: row.get(6)?,
-        divergences: parse_strings(&row.get::<_, String>(7)?),
+        divergences: parse_divergences(&row.get::<_, String>(7)?),
         rotation_count: row.get(8)?,
         turn_count: row.get(9)?,
         parent_session_id: row.get(10)?,
