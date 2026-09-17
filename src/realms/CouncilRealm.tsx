@@ -45,7 +45,8 @@ interface SeatSlot {
   readonly key: string;
   readonly layer: LayerKey;
   readonly angle: number;
-  readonly seat: CouncilSeat | null;
+  /** 站上这一题的人。库里缺某一题的大师时，这一题可以站上两位，构成同题对立。 */
+  readonly occupants: readonly CouncilSeat[];
 }
 
 /**
@@ -155,8 +156,8 @@ export function CouncilRealm({
 
   const slots = useMemo<SeatSlot[]>(() => {
     return LAYER_KEYS.map((layer, index) => {
-      const seat = seats.find((item) => item.layer === layer) ?? null;
-      return { key: layer, layer, angle: seatAngle(index), seat };
+      const occupants = seats.filter((item) => item.layer === layer);
+      return { key: layer, layer, angle: seatAngle(index), occupants };
     });
   }, [seats]);
 
@@ -632,13 +633,13 @@ export function CouncilRealm({
           <ul className="roundtable__seats">
             {slots.map((slot) => {
               const layer = layerOf(slot.layer);
-              const seat = slot.seat;
+              const occupants = slot.occupants;
               return (
                 <li
                   key={slot.key}
                   className="seat"
                   data-layer={slot.layer}
-                  data-filled={seat ? "true" : "false"}
+                  data-filled={occupants.length > 0 ? "true" : "false"}
                   data-gap={gaps.includes(slot.layer) ? "true" : "false"}
                   style={{ "--angle": `${slot.angle}deg` } as CSSProperties}
                 >
@@ -646,26 +647,44 @@ export function CouncilRealm({
                     <LayerGlyph glyph={layer.glyph} size={14} />
                   </span>
                   <span className="seat__layer">{layer.name}</span>
-                  <span className="seat__name">{seat?.name ?? "待选角"}</span>
                   <span className="seat__question">{layer.question}</span>
                   {gaps.includes(slot.layer) ? (
-                    <span className="seat__gap">这一题还缺人</span>
+                    <span className="seat__gap">这一题还要再谈</span>
                   ) : null}
-                  {seat ? <span className="seat__domain">{seat.domain}</span> : null}
-                  {seat ? (
-                    <>
-                      <span className="seat__score">契合度 {seat.score.toFixed(2)}</span>
-                      <button
-                        className="seat__pin"
-                        type="button"
-                        aria-pressed={seat.pinned || pinned.includes(seat.masterId)}
-                        data-pinned={seat.pinned || pinned.includes(seat.masterId)}
-                        onClick={() => togglePin(seat.masterId)}
-                      >
-                        {seat.pinned || pinned.includes(seat.masterId) ? "已锁定" : "锁定"}
-                      </button>
-                    </>
+                  {occupants.length === 0 ? (
+                    <span className="seat__name">待选角</span>
                   ) : null}
+                  {occupants.length > 1 ? (
+                    <span className="seat__same-question">
+                      同一题上有 {occupants.length} 位
+                    </span>
+                  ) : null}
+                  <ul className="seat__people">
+                    {occupants.map((occupant) => (
+                      <li key={occupant.masterId} className="seat__person">
+                        <span className="seat__name">{occupant.name}</span>
+                        <span className="seat__domain">{occupant.domain}</span>
+                        <span className="seat__score">
+                          契合度 {occupant.score.toFixed(2)}
+                        </span>
+                        <button
+                          className="seat__pin"
+                          type="button"
+                          aria-pressed={
+                            occupant.pinned || pinned.includes(occupant.masterId)
+                          }
+                          data-pinned={
+                            occupant.pinned || pinned.includes(occupant.masterId)
+                          }
+                          onClick={() => togglePin(occupant.masterId)}
+                        >
+                          {occupant.pinned || pinned.includes(occupant.masterId)
+                            ? "已锁定"
+                            : "锁定"}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 </li>
               );
             })}
@@ -679,10 +698,10 @@ export function CouncilRealm({
         </div>
 
         {gaps.length > 0 ? (
-          <section className="council__gaps" aria-label="还缺人的题">
-            <h3 className="section-head">还缺人的题 · {gaps.length} 道</h3>
+          <section className="council__gaps" aria-label="还要再谈的题">
+            <h3 className="section-head">还要再谈的题 · {gaps.length} 道</h3>
             <p className="council__note">
-              可能这一轮没人在这一题上说得上话，也可能能谈这一题的人还不到两位，凑不成一次对谈。换一批时会优先给这几道题补人。
+              没人站上、能谈这一题的人不到两位，或上一轮没谈拢，都会记在这里。换一批时会优先给这几道题补人。
             </p>
             <ul className="council__gap-list">
               {gaps.map((layer) => {

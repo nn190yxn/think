@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { CouncilRealm } from "./CouncilRealm";
 import { IpcProvider } from "../app/ipc";
+import { createCommandClient, stubTransport } from "../ipc/client";
+import { demoSelection } from "../ipc/demoData";
 
 function renderRealm() {
   return render(
@@ -10,6 +12,27 @@ function renderRealm() {
       <CouncilRealm />
     </IpcProvider>,
   );
+}
+
+/** 库里没有谈「势」的大师时，选角会在已经有人站上的「道」再补一位。 */
+function duplicatedSelection() {
+  const base = demoSelection("steady");
+  const dao = base.seats.find((seat) => seat.layer === "dao")!;
+  return {
+    ...base,
+    seats: [
+      ...base.seats.filter((seat) => seat.layer !== "shi"),
+      {
+        ...dao,
+        masterId: "viktor-frankl",
+        name: "维克多·弗兰克尔",
+        domain: "意义",
+        layers: ["qi", "dao"],
+        score: 0.58,
+      },
+    ],
+    gaps: ["shi"],
+  };
 }
 
 async function runCouncil() {
@@ -49,6 +72,39 @@ describe("圆桌会诊", () => {
     ]);
   });
 
+  it("同一题站上两位时，两位都在圆桌上露面并可分别锁定", async () => {
+    const selection = duplicatedSelection();
+    const client = createCommandClient({
+      invoke: async (name, request) => {
+        if (name === "council_select" || name === "council_rotate") {
+          return { ok: true, data: selection };
+        }
+        return stubTransport.invoke(name, request);
+      },
+    });
+    render(
+      <IpcProvider client={client}>
+        <CouncilRealm />
+      </IpcProvider>,
+    );
+    await userEvent.type(screen.getByLabelText("议题"), "要不要换一条赛道");
+    await userEvent.click(screen.getByRole("button", { name: "发起会诊" }));
+
+    const dao = await waitFor(() => {
+      const seat = document.querySelector('.seat[data-layer="dao"]') as HTMLElement;
+      expect(seat.querySelectorAll(".seat__person")).toHaveLength(2);
+      return seat;
+    });
+    expect(within(dao).getByText("同一题上有 2 位")).toBeInTheDocument();
+    expect(within(dao).getByText("稻盛和夫")).toBeInTheDocument();
+    expect(within(dao).getByText("维克多·弗兰克尔")).toBeInTheDocument();
+    expect(within(dao).getAllByRole("button", { name: "锁定" })).toHaveLength(2);
+    // 没人谈的「势」仍然是缺口题，也仍然只占一个空位。
+    expect(document.querySelector('.seat[data-layer="shi"]')).toHaveTextContent(
+      "这一题还要再谈",
+    );
+  });
+
   it("空议题时给出提示且不选角", async () => {
     renderRealm();
     await userEvent.click(screen.getByRole("button", { name: "发起会诊" }));
@@ -56,11 +112,11 @@ describe("圆桌会诊", () => {
     expect(document.querySelectorAll('.seat[data-filled="true"]')).toHaveLength(0);
   });
 
-  it("还缺人的题单独列出，并在对应的席位上标注", async () => {
+  it("还要再谈的题单独列出，并在对应的席位上标注", async () => {
     await runCouncil();
 
-    const gaps = (await screen.findByRole("region", { name: "还缺人的题" })) as HTMLElement;
-    expect(within(gaps).getByText("还缺人的题 · 2 道")).toBeInTheDocument();
+    const gaps = (await screen.findByRole("region", { name: "还要再谈的题" })) as HTMLElement;
+    expect(within(gaps).getByText("还要再谈的题 · 2 道")).toBeInTheDocument();
     expect(within(gaps).getByText("术 · 具体怎么做")).toBeInTheDocument();
     expect(within(gaps).getByText("势 · 现在是不是时候")).toBeInTheDocument();
     expect(within(gaps).getByText(/换一批时会优先给这几道题补人/)).toBeInTheDocument();
@@ -69,7 +125,7 @@ describe("圆桌会诊", () => {
     const marked = Array.from(document.querySelectorAll('.seat[data-gap="true"]'));
     expect(marked).toHaveLength(2);
     for (const seat of marked) {
-      expect(seat).toHaveTextContent("这一题还缺人");
+      expect(seat).toHaveTextContent("这一题还要再谈");
     }
   });
 

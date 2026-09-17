@@ -14,12 +14,19 @@ import type { CommandName, CommandRequest, CommandResponse } from "../ipc/comman
 
 const IpcContext = createContext<CommandClient | null>(null);
 
-export function IpcProvider({ children }: { children: ReactNode }) {
-  const client = useMemo(
+export function IpcProvider({
+  children,
+  client,
+}: {
+  children: ReactNode;
+  /** 测试可以注入自定义客户端，覆盖个别命令的返回值。 */
+  client?: CommandClient;
+}) {
+  const fallback = useMemo(
     () => createCommandClient(isDesktopShell() ? tauriTransport : stubTransport),
     [],
   );
-  return <IpcContext.Provider value={client}>{children}</IpcContext.Provider>;
+  return <IpcContext.Provider value={client ?? fallback}>{children}</IpcContext.Provider>;
 }
 
 export function useCommands(): CommandClient {

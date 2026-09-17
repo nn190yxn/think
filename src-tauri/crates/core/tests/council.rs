@@ -164,12 +164,16 @@ fn build_pool(conn: &rusqlite::Connection) -> CandidatePool {
     .expect("候选池可构建")
 }
 
-/// 只声明「法」这一题、单元文本可控的大师，用来验证同题对立影响选角。
-fn install_fa_master(
+/// 声明指定若干题、单元文本可控的大师，用来验证同题对立与缺口题。
+///
+/// 单元归到第一个声明的题，保证满足「技能单元层次是声明层次的子集」这一约束。
+fn install_layer_master(
     conn: &mut rusqlite::Connection,
     id: &str,
+    layers: &[&str],
     mechanism: &str,
 ) -> tempfile::TempDir {
+    let first = layers.first().copied().unwrap_or("fa");
     let dir = tempfile::tempdir().expect("临时目录");
     let manifest = serde_json::json!({
         "format": "thought-forge.master-pack",
@@ -177,15 +181,15 @@ fn install_fa_master(
         "id": id,
         "name": format!("文本大师{id}"),
         "domain": "通用判断",
-        "layers": ["fa"],
+        "layers": layers,
         "version": 1,
         "summary": "同题对立测试用",
         "style": "直接",
-        "blindSpots": "只谈规律",
+        "blindSpots": "只谈自己声明的题",
         "note": "测试用",
         "units": [{
             "title": format!("判断{id}"),
-            "layer": "fa",
+            "layer": first,
             "triggerCondition": "当需要判断一件事的规律时",
             "steps": ["看动机", "看边界"],
             "mechanism": mechanism,
@@ -213,6 +217,15 @@ fn install_fa_master(
     std::fs::write(corpus_dir.join("notes.md"), "笔记。\n").unwrap();
     masters::install(conn, dir.path()).expect("文本大师可安装");
     dir
+}
+
+/// 只声明「法」这一题的大师，供同题对立用例使用。
+fn install_fa_master(
+    conn: &mut rusqlite::Connection,
+    id: &str,
+    mechanism: &str,
+) -> tempfile::TempDir {
+    install_layer_master(conn, id, &["fa"], mechanism)
 }
 
 #[test]
@@ -301,6 +314,41 @@ fn a_richer_pool_has_no_gap_questions() {
         .expect("可完成选角");
 
     assert!(plan.gaps.is_empty(), "每题都有两位以上候选时不应有缺口题");
+}
+
+#[test]
+fn a_missing_question_puts_a_second_seat_on_another_question() {
+    let mut conn = db::open_in_memory().expect("内存库可打开");
+    migrations::apply_all(&mut conn).expect("迁移可执行");
+    // 库里没有任何一位谈「势」的大师，六席就凑不满六题。
+    for (index, layer) in ["dao", "fa", "shu", "qi", "tool"].iter().enumerate() {
+        install_layer_master(
+            &mut conn,
+            &format!("only-{index:02}"),
+            &[layer],
+            "各按自己的题判断",
+        );
+    }
+    // 第六位只谈「道」，于是补位时会在已经有人站上的「道」再加一位。
+    install_layer_master(&mut conn, "extra-dao", &["dao"], "另一套判断");
+    pairings::recompute(&conn).expect("对立度可重算");
+
+    let plan = select::select_panel(
+        &conn,
+        &build_pool(&conn),
+        &select::SelectionRequest::new(Strategy::Steady),
+    )
+    .expect("可完成选角");
+
+    assert_eq!(plan.seats.len(), 6, "席位数应补齐到六");
+    let dao: Vec<&str> = plan
+        .seats
+        .iter()
+        .filter(|seat| seat.layer == Layer::Dao)
+        .map(|seat| seat.master_id.as_str())
+        .collect();
+    assert_eq!(dao.len(), 2, "道这一题应站上两位，同题对立才有来源");
+    assert!(plan.gaps.contains(&Layer::Shi), "无人谈的势应记为缺口题");
 }
 
 #[test]

@@ -1139,13 +1139,40 @@
   text-align: center;
 }
 
+/* 同一题上站了两位时，两位都在卡里露名，避免圆桌漏掉一个人。 */
+.seat__people {
+  display: grid;
+  gap: var(--sp-1);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.seat__person {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.seat__person + .seat__person {
+  padding-top: var(--sp-1);
+  border-top: var(--line-w) dashed color-mix(in srgb, var(--layer) 35%, transparent);
+}
+
+.seat__same-question {
+  color: var(--text-3);
+  font-size: var(--fs-mono);
+}
+
 .seat__domain {
   color: var(--text-2);
   font-size: var(--fs-mono);
   text-align: center;
 }
 
-/* 还缺人的题：虚线边框加文字标记，不靠颜色单通道表达。 */
+/* 还要再谈的题：虚线边框加文字标记，不靠颜色单通道表达。 */
 .seat[data-gap="true"] {
   border-style: dashed;
 }
