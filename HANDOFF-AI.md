@@ -72,6 +72,10 @@ set RUSTUP_UPDATE_ROOT=https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup
 
 ### 3.3 判据：工具链就绪
 
+> **已装好（2026-09-19 实测）**：`cargo 1.98.1` / `rustc 1.98.1` 位于 `C:\Users\Alex\.cargo\bin`，但**该目录不在默认 PATH 里**（新开的终端里直接敲 `cargo -V` 会报「不是内部或外部命令」）。
+> 跑门禁前先补：PowerShell `$env:Path = 'C:\Users\Alex\.cargo\bin;' + $env:Path`；cmd `set PATH=C:\Users\Alex\.cargo\bin;%PATH%`。
+> 找不到 cargo 时先查这里，**不要误判成「本机没装工具链」**（复核者已因此错过两次判断）。
+
 ```
 cargo -V          :: 需要 ≥ 1.85
 rustc -V
