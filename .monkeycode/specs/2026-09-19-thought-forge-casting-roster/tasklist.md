@@ -13,7 +13,7 @@
 - [x] 20.1 `council/pool.rs` 的 `build()` 给 `Candidate` 增加 `layer_depth`（每题单元数），并补内核断言
 - [x] 20.2 `council/select.rs` 的层次排序主键改为该题积累深度，同深度回落到原策略评分
 - [x] 20.3 `council/select.rs` 锁定席位落座层改为「积累最深的未覆盖题」，并列按道法术气器势顺序
-- [ ] 20.4 `src-tauri/src/commands.rs` 的 `master_list` 带上六题积累计数，同步 `src/ipc/commands.ts` 类型与 `client.ts` 桩数据
+- [x] 20.4 `src-tauri/src/commands.rs` 的 `master_list` 带上六题积累计数，同步 `src/ipc/commands.ts` 类型与 `client.ts` 桩数据
 - [ ] 20.5 `src/realms/CouncilRealm.tsx` 的「待选角」改为可点按钮，已坐席位增加「换人」
 - [ ] 20.6 新增 `src/components/SeatPicker.tsx`：名册网格、六题积累条、本席位契合度、分档排序、判定他会坐哪一题
 - [ ] 20.7 点将确认后座位上留痕「已点 · 姓名」并可取消，复用既有 `pinned` 通道传给 `council_select`

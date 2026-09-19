@@ -435,6 +435,13 @@ fn list_filters_by_domain_and_layer() {
     let summary = &masters::list(&conn, None, None).unwrap()[0];
     assert_eq!(summary.unit_count, 1);
     assert_eq!(summary.current_version, 1);
+    assert_eq!(summary.layer_profile.len(), 6);
+    assert_eq!(summary.layer_profile[0].layer, Layer::Dao);
+    assert_eq!(summary.layer_profile[0].unit_count, 1);
+    assert_eq!(summary.layer_profile[0].unit_titles, vec!["甲".to_string()]);
+    for entry in &summary.layer_profile[1..] {
+        assert_eq!(entry.unit_count, 0);
+    }
 }
 
 #[test]

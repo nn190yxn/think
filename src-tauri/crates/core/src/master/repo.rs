@@ -12,7 +12,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::master::pack::{self, ValidatedEvidence, ValidatedPack};
 use crate::master::{
     layer_profile, CoverageMatrix, DomainCoverage, InstallOutcome, Layer, LayerCoverage,
-    MasterDetail, MasterSummary, MasterUnitView, VersionDiff, VersionView, LAYER_ORDER,
+    LayerProfile, MasterDetail, MasterSummary, MasterUnitView, VersionDiff, VersionView, LAYER_ORDER,
 };
 
 fn now(conn: &Connection) -> CoreResult<String> {
@@ -471,6 +471,7 @@ pub fn list(
             status: row.get(4)?,
             current_version: row.get(5)?,
             unit_count: row.get(8)?,
+            layer_profile: Vec::new(),
             installed_at: row.get(6)?,
             updated_at: row.get(7)?,
         })
@@ -491,7 +492,59 @@ pub fn list(
         }
         masters.push(master);
     }
+    attach_layer_profiles(conn, &mut masters)?;
     Ok(masters)
+}
+
+fn attach_layer_profiles(conn: &Connection, masters: &mut [MasterSummary]) -> CoreResult<()> {
+    let mut titles: BTreeMap<String, Vec<(Layer, String)>> = BTreeMap::new();
+    let mut stmt = conn.prepare(
+        "SELECT u.master_id, u.layer, u.title
+           FROM master_units u
+           JOIN masters m ON m.id = u.master_id
+          WHERE u.version = m.current_version
+          ORDER BY u.master_id ASC, u.ordinal ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (master_id, layer_name, title) = row?;
+        let Some(layer) = Layer::parse(&layer_name) else {
+            continue;
+        };
+        titles.entry(master_id).or_default().push((layer, title));
+    }
+    for master in masters.iter_mut() {
+        let items = titles.remove(&master.id).unwrap_or_default();
+        master.layer_profile = layer_profile_from_titles(&items);
+    }
+    Ok(())
+}
+
+fn layer_profile_from_titles(items: &[(Layer, String)]) -> Vec<LayerProfile> {
+    LAYER_ORDER
+        .iter()
+        .copied()
+        .map(|layer| {
+            let unit_titles: Vec<String> = items
+                .iter()
+                .filter(|(item_layer, _)| *item_layer == layer)
+                .map(|(_, title)| title.clone())
+                .collect();
+            LayerProfile {
+                layer,
+                name: layer.name().to_string(),
+                question: layer.question().to_string(),
+                unit_count: unit_titles.len() as i64,
+                unit_titles,
+            }
+        })
+        .collect()
 }
 
 pub fn detail(conn: &Connection, master_id: &str) -> CoreResult<MasterDetail> {

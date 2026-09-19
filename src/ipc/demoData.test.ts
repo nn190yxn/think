@@ -33,6 +33,8 @@ describe("预览数据集", () => {
     for (const summary of DEMO_SUMMARIES) {
       const detail = demoDetail(summary.id);
       expect(detail?.units).toHaveLength(summary.unitCount);
+      expect(summary.layerProfile).toHaveLength(LAYER_KEYS.length);
+      expect(summary.layerProfile).toEqual(detail?.layerProfile);
       for (const unit of detail?.units ?? []) {
         expect(unit.citations.length).toBeGreaterThan(0);
         expect(unit.citations[0]?.available).toBe(true);

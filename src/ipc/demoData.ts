@@ -44,6 +44,7 @@ import type {
   KnowledgeOverview,
   LlmCall,
   MasterDetail,
+  LayerProfile,
   MasterSummary,
   ModelProbeOutcome,
   NodeDetail,
@@ -271,6 +272,16 @@ export const DEMO_MASTERS: readonly DemoMaster[] = [
   },
 ];
 
+function demoLayerProfile(units: DemoMaster["units"]): readonly LayerProfile[] {
+  return layerDepth(units).map((entry) => ({
+    layer: entry.key,
+    name: layerOf(entry.key).name,
+    question: layerOf(entry.key).question,
+    unitCount: entry.count,
+    unitTitles: entry.titles,
+  }));
+}
+
 const REGISTERED_AT = "2026-09-14T00:00:00Z";
 
 export const DEMO_SUMMARIES: readonly MasterSummary[] = DEMO_MASTERS.map((master) => ({
@@ -281,6 +292,7 @@ export const DEMO_SUMMARIES: readonly MasterSummary[] = DEMO_MASTERS.map((master
   status: "ready",
   currentVersion: 1,
   unitCount: master.units.length,
+  layerProfile: demoLayerProfile(master.units),
   installedAt: REGISTERED_AT,
   updatedAt: REGISTERED_AT,
 }));
@@ -331,13 +343,7 @@ export function demoDetail(masterId: string): MasterDetail | null {
         },
       },
     ],
-    layerProfile: layerDepth(master.units).map((entry) => ({
-      layer: entry.key,
-      name: layerOf(entry.key).name,
-      question: layerOf(entry.key).question,
-      unitCount: entry.count,
-      unitTitles: entry.titles,
-    })),
+    layerProfile: demoLayerProfile(master.units),
   };
 }
 

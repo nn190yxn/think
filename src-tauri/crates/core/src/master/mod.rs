@@ -111,6 +111,8 @@ pub struct MasterSummary {
     pub status: String,
     pub current_version: i64,
     pub unit_count: i64,
+    /// 六题积累：按道法术气器势给出每题单元数，空缺题计数为零。
+    pub layer_profile: Vec<LayerProfile>,
     pub installed_at: String,
     pub updated_at: String,
 }

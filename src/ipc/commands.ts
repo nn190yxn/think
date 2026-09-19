@@ -38,6 +38,8 @@ export interface MasterSummary {
   readonly status: string;
   readonly currentVersion: number;
   readonly unitCount: number;
+  /** 六题积累：按道法术气器势给出每题单元数，空缺题计数为零。 */
+  readonly layerProfile: readonly LayerProfile[];
   readonly installedAt: string;
   readonly updatedAt: string;
 }
