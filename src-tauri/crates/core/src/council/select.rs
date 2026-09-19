@@ -108,7 +108,7 @@ fn deepest_layer(candidate: &Candidate, covered: &BTreeSet<Layer>) -> Layer {
             if count == 0 {
                 continue;
             }
-            if best.map_or(true, |(_, best_count)| count > best_count) {
+            if best.is_none_or(|(_, best_count)| count > best_count) {
                 best = Some((layer, count));
             }
         }

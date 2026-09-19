@@ -1761,3 +1761,237 @@ fn resume_reuses_completed_rounds_and_synthesis() {
     );
     assert_eq!(repo::get_session(&conn, &session).unwrap().status, "done");
 }
+
+/// 声明若干题、并按给定 (层次, 标题) 写入多条单元，用来验证六题积累深浅。
+fn install_master_with_units(
+    conn: &mut rusqlite::Connection,
+    id: &str,
+    layers: &[&str],
+    units: &[(&str, &str)],
+) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let unit_json: Vec<serde_json::Value> = units
+        .iter()
+        .enumerate()
+        .map(|(index, (layer, title))| {
+            serde_json::json!({
+                "title": format!("{title}-{index}"),
+                "layer": layer,
+                "triggerCondition": "当需要判断一件事时",
+                "steps": ["看动机", "看边界"],
+                "mechanism": format!("{title}的机制"),
+                "boundary": "测试用边界",
+                "evidence": [{
+                    "corpusRef": "corpus/notes.md",
+                    "excerpt": "笔记",
+                    "location": "全篇"
+                }]
+            })
+        })
+        .collect();
+    let manifest = serde_json::json!({
+        "format": "thought-forge.master-pack",
+        "formatVersion": 1,
+        "id": id,
+        "name": format!("深度大师{id}"),
+        "domain": "通用判断",
+        "layers": layers,
+        "version": 1,
+        "summary": "六题积累测试用",
+        "style": "直接",
+        "blindSpots": "测试",
+        "note": "测试用",
+        "units": unit_json,
+        "corpus": [{
+            "ref": "corpus/notes.md",
+            "kind": "book",
+            "title": "深度笔记",
+            "locationHint": "全篇"
+        }]
+    });
+    std::fs::write(
+        dir.path().join("master.json"),
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    let corpus_dir = dir.path().join("corpus");
+    std::fs::create_dir_all(&corpus_dir).unwrap();
+    std::fs::write(corpus_dir.join("notes.md"), "笔记。\n").unwrap();
+    masters::install(conn, dir.path()).expect("深度大师可安装");
+    dir
+}
+
+#[test]
+fn layer_depth_matches_current_version_unit_counts() {
+    let conn = seeded_db();
+    let pool = build_pool(&conn);
+    assert!(!pool.candidates.is_empty(), "种子库应有候选");
+    for candidate in &pool.candidates {
+        let mut stmt = conn
+            .prepare(
+                "SELECT u.layer, COUNT(*)
+                   FROM master_units u
+                   JOIN masters m ON m.id = u.master_id
+                  WHERE u.master_id = ?1 AND u.version = m.current_version
+                  GROUP BY u.layer",
+            )
+            .unwrap();
+        let rows = stmt
+            .query_map(rusqlite::params![candidate.master_id.as_str()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
+            })
+            .unwrap();
+        let mut expected = std::collections::BTreeMap::new();
+        for row in rows {
+            let (layer_name, count) = row.unwrap();
+            let layer = Layer::parse(&layer_name).expect("层次可解析");
+            assert!(count > 0, "没有单元的题不应出现在计数里");
+            expected.insert(layer, count);
+        }
+        assert_eq!(
+            candidate.layer_depth, expected,
+            "{} 的每题积累应与当前版本单元数一致",
+            candidate.master_id
+        );
+    }
+}
+
+#[test]
+fn deeper_on_the_same_question_is_preferred() {
+    let mut conn = db::open_in_memory().expect("内存库可打开");
+    migrations::apply_all(&mut conn).expect("迁移可执行");
+    let _rich = install_master_with_units(
+        &mut conn,
+        "rich-fa",
+        &["fa"],
+        &[("fa", "深1"), ("fa", "深2"), ("fa", "深3")],
+    );
+    let _lean = install_master_with_units(&mut conn, "lean-fa", &["fa"], &[("fa", "浅1")]);
+    pairings::recompute(&conn).expect("对立度可重算");
+
+    let plan = select::select_panel(
+        &conn,
+        &build_pool(&conn),
+        &select::SelectionRequest {
+            strategy: Strategy::Steady,
+            size: 1,
+            pinned: &[],
+            exclude: &[],
+            previous: &[],
+            diverged: &[],
+        },
+    )
+    .expect("可完成选角");
+    assert!(!plan.seats.is_empty(), "至少应有一席（席位数下限为四，两人都会入席）");
+    assert_eq!(plan.seats[0].master_id, "rich-fa", "同一题上料多者应入席");
+    assert_eq!(plan.seats[0].layer, Layer::Fa);
+}
+
+#[test]
+fn pinned_seat_sits_on_deepest_uncovered_question() {
+    let mut conn = db::open_in_memory().expect("内存库可打开");
+    migrations::apply_all(&mut conn).expect("迁移可执行");
+    let _cover = install_master_with_units(&mut conn, "cover-fa", &["fa"], &[("fa", "法占")]);
+    let _deep = install_master_with_units(
+        &mut conn,
+        "deep-multi",
+        &["dao", "fa", "shu"],
+        &[
+            ("dao", "道浅"),
+            ("fa", "法1"),
+            ("fa", "法2"),
+            ("fa", "法3"),
+            ("shu", "术1"),
+            ("shu", "术2"),
+        ],
+    );
+    pairings::recompute(&conn).expect("对立度可重算");
+    let pool = build_pool(&conn);
+
+    let only_deep = vec!["deep-multi".to_string()];
+    let first = select::select_panel(
+        &conn,
+        &pool,
+        &select::SelectionRequest {
+            strategy: Strategy::Steady,
+            size: 1,
+            pinned: &only_deep,
+            exclude: &[],
+            previous: &[],
+            diverged: &[],
+        },
+    )
+    .expect("可完成选角");
+    assert_eq!(first.seats[0].master_id, "deep-multi");
+    assert_eq!(
+        first.seats[0].layer,
+        Layer::Fa,
+        "未被覆盖时落在积累最深的法"
+    );
+
+    let both = vec!["cover-fa".to_string(), "deep-multi".to_string()];
+    let second = select::select_panel(
+        &conn,
+        &pool,
+        &select::SelectionRequest {
+            strategy: Strategy::Steady,
+            size: 2,
+            pinned: &both,
+            exclude: &[],
+            previous: &[],
+            diverged: &[],
+        },
+    )
+    .expect("可完成选角");
+    assert_eq!(second.seats[0].master_id, "cover-fa");
+    assert_eq!(second.seats[0].layer, Layer::Fa, "先入席的人占住法");
+    assert_eq!(second.seats[1].master_id, "deep-multi");
+    assert_eq!(
+        second.seats[1].layer,
+        Layer::Shu,
+        "法已被占，应落到未覆盖里最深的术，而不是更浅的道"
+    );
+}
+
+#[test]
+fn master_without_units_falls_back_to_declared_layer() {
+    let mut conn = db::open_in_memory().expect("内存库可打开");
+    migrations::apply_all(&mut conn).expect("迁移可执行");
+    let _dir = install_layer_master(&mut conn, "empty-units", &["shu", "qi"], "占位机制");
+    conn.execute("DELETE FROM master_units WHERE master_id = 'empty-units'", [])
+        .unwrap();
+    pairings::recompute(&conn).expect("对立度可重算");
+
+    let pool = build_pool(&conn);
+    let candidate = pool
+        .candidates
+        .iter()
+        .find(|item| item.master_id == "empty-units")
+        .expect("无单元大师仍应在候选池");
+    assert!(
+        candidate.layer_depth.is_empty(),
+        "删光单元后 layer_depth 应为空"
+    );
+
+    let pinned = vec!["empty-units".to_string()];
+    let plan = select::select_panel(
+        &conn,
+        &pool,
+        &select::SelectionRequest {
+            strategy: Strategy::Steady,
+            size: 1,
+            pinned: &pinned,
+            exclude: &[],
+            previous: &[],
+            diverged: &[],
+        },
+    )
+    .expect("可完成选角");
+    assert_eq!(plan.seats[0].master_id, "empty-units");
+    assert_eq!(
+        plan.seats[0].layer,
+        Layer::Shu,
+        "全无单元时应落回声明层里按道法术气器势最靠前的一题"
+    );
+
+}
