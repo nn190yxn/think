@@ -2786,6 +2786,47 @@
   font-size: var(--fs-meta);
 }
 
+.platform__actions {
+  grid-row: 1 / span 2;
+  align-self: center;
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.checkups {
+  display: grid;
+  gap: var(--sp-1);
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checkup {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: var(--line-w) solid var(--line);
+}
+
+.checkup:last-child {
+  border-bottom: none;
+}
+
+.checkup__label {
+  color: var(--text-2);
+}
+
+.checkup[data-ok="false"] .checkup__state {
+  color: var(--ember-bright);
+}
+
+.checkup__hint {
+  grid-column: 2;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+}
+
 .calls {
   display: grid;
   gap: var(--sp-1);
@@ -3156,6 +3197,34 @@
 
 .vault-views button[data-on="true"],
 .self-views button[data-on="true"] {
+  background: var(--bg-0);
+  color: var(--text-1);
+}
+
+/* 设置页很长，给一排分区按钮直接跳过去。 */
+.setting-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-1);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-2) 55%, transparent);
+}
+
+.setting-nav button {
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+
+.setting-nav button:hover {
   background: var(--bg-0);
   color: var(--text-1);
 }

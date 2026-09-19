@@ -48,6 +48,11 @@ jobs:
         working-directory: src-tauri
         run: cargo test -p thought-forge-core
 
+      # 十万节点性能用例已用 #[ignore] 移出默认门禁，发版前在这里单独跑。
+      - name: Test Rust core performance
+        working-directory: src-tauri
+        run: cargo test -p thought-forge-core -- --ignored
+
       - name: Test desktop shell
         working-directory: src-tauri
         run: cargo test -p thought-forge-desktop --lib

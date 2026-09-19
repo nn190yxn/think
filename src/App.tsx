@@ -23,6 +23,8 @@ export function App() {
   const [seed, setSeed] = useState<string | null>(null);
   const [councilSession, setCouncilSession] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // 「我」分成长与设置两处：顶部「设置」按钮直进设置，走脊柱或命令面板则默认看成长。
+  const [selfView, setSelfView] = useState<"growth" | "system">("growth");
   const snapshot = useCommand("furnace_snapshot", {});
   const networking = useCommand("networking_get", {});
   const offline = networking.data !== true;
@@ -38,6 +40,17 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // 走到「我」默认看成长，只有顶部「设置」按钮会指定看设置。
+  const goRealm = useCallback(
+    (next: Parameters<typeof navigate>[0]) => {
+      if (next === "self") {
+        setSelfView("growth");
+      }
+      navigate(next);
+    },
+    [navigate],
+  );
 
   // 从星图把节点内容变成会诊议题，是全应用的主链路之一。
   const seedCouncil = useCallback(
@@ -82,12 +95,23 @@ export function App() {
 
   return (
     <div className="shell">
-      <Spine entries={entries} current={realm} onSelect={navigate} />
+      <Spine entries={entries} current={realm} onSelect={goRealm} />
       <main className="stage">
         <div className="stage__bar">
           <span className="stage__crumb">
             {realmOf(realm).sigil} · {realmOf(realm).title}
           </span>
+          <button
+            className="stage__palette"
+            type="button"
+            aria-label="打开设置"
+            onClick={() => {
+              setSelfView("system");
+              navigate("self");
+            }}
+          >
+            设置
+          </button>
           <button
             className="stage__palette"
             type="button"
@@ -110,6 +134,8 @@ export function App() {
               onThemeChange={setTheme}
               preferences={preferences}
               onPreferencesChange={updatePreferences}
+              view={selfView}
+              onViewChange={setSelfView}
             />
           ) : null}
         </div>
@@ -121,7 +147,7 @@ export function App() {
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
-        onNavigate={navigate}
+        onNavigate={goRealm}
         onSeedCouncil={seedCouncil}
         theme={theme}
         onThemeChange={setTheme}

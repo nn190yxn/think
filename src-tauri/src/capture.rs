@@ -414,8 +414,19 @@ mod tests {
         assert_eq!(found[0].occurred_at.len(), 20);
         assert!(found[0].occurred_at.ends_with('Z'));
 
-        // 队列排空后不应重复上报同一条事件。
-        assert!(capture.file_samples().is_empty());
+        // 队列排空后不应重复上报同一条事件。判据不能取「队列为空」：Windows 上写
+        // 一个文件会同时产生 create 与 modify 两个事件，投递时刻不定，稍晚到达的
+        // modify 会让空队列断言随机失败。这里等一拍再排空，只要求同一路径上的同
+        // 一个事件类型不再出现第二次。
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        for sample in capture.file_samples() {
+            assert!(
+                !(sample.text == found[0].text
+                    && sample.payload["eventType"] == found[0].payload["eventType"]),
+                "同一条文件事件被重复上报：{}",
+                sample.text
+            );
+        }
         std::fs::remove_dir_all(&root).ok();
     }
 }

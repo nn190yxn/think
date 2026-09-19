@@ -8,7 +8,10 @@ use thought_forge_core::network::GraphFilter;
 
 const NODES: usize = 100_000;
 
+// 十万节点建库是分钟级开销，不进默认门禁：每次 `cargo test` 都重跑它会把内核
+// 门禁拖长一个量级。要跑用 `pnpm gate:perf`，两个云端工作流各有独立步骤覆盖。
 #[test]
+#[ignore = "十万节点建库是分钟级开销，用 `pnpm gate:perf` 单独跑"]
 fn graph_retrieval_scales_to_one_hundred_thousand_nodes() {
     let mut conn = db::open_in_memory().expect("内存库可打开");
     migrations::apply_all(&mut conn).expect("迁移可执行");

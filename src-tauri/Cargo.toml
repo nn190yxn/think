@@ -51,3 +51,9 @@ keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+# 开发与测试构建只保留行号级调试信息。默认的 `debug = 2` 会为每个 crate 产出完整
+# 调试段，target 体积与链接时间都明显更大；`debug = 1` 仍保留可定位到行的回溯。
+# 需要完整调试信息时用 `CARGO_PROFILE_DEV_DEBUG=2` 临时覆盖。
+[profile.dev]
+debug = 1

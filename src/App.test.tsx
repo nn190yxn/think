@@ -94,7 +94,7 @@ describe("应用外壳", () => {
   it("我境界显示运行信息", async () => {
     renderApp();
     await userEvent.click(screen.getByRole("button", { name: /成长与设置/ }));
-    await userEvent.click(await screen.findByRole("tab", { name: "系统" }));
+    await userEvent.click(await screen.findByRole("tab", { name: "设置" }));
     expect(await screen.findByText("数据格式版本")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText("memory")).toBeInTheDocument();
@@ -104,13 +104,19 @@ describe("应用外壳", () => {
   it("设置页默认关闭联网，并可逐项启用模型平台", async () => {
     renderApp();
     await userEvent.click(screen.getByRole("button", { name: /成长与设置/ }));
-    await userEvent.click(await screen.findByRole("tab", { name: "系统" }));
+    await userEvent.click(await screen.findByRole("tab", { name: "设置" }));
     const toggle = await screen.findByRole("switch", { name: "联网能力" });
     expect(toggle).toHaveAttribute("aria-checked", "false");
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(await screen.findByText(/本地模型/)).toBeInTheDocument();
     expect(await screen.findByText(/联网能力没有开启/)).toBeInTheDocument();
+  });
+
+  it("顶部设置按钮直接进「我」的设置页", async () => {
+    renderApp();
+    await userEvent.click(await screen.findByRole("button", { name: "打开设置" }));
+    expect(await screen.findByRole("heading", { name: "体检清单" })).toBeInTheDocument();
   });
 
   it("联网关闭时炉温环外显示虚线离线态，本机内容仍可读", async () => {

@@ -1215,8 +1215,13 @@ mod tests {
 
     /// 攒出健康状态：平台、采集、会话与发言、席位来源、蒸馏、三类连接器、备份。
     fn seed_healthy(conn: &Connection) {
-        let backup = "/tmp/forge-verify-test-backup.db";
-        std::fs::write(backup, b"stand-in").expect("写备份替身");
+        // 关注目录与备份路径都要求真实存在的绝对路径，因此用系统临时目录。
+        // 不能写死 "/tmp"：Windows 上它既不是绝对路径，目录也未必存在。
+        let fixture_dir = std::env::temp_dir().join("forge-verify-fixture");
+        std::fs::create_dir_all(&fixture_dir).expect("建夹具临时目录");
+        let backup_file = fixture_dir.join("forge-verify-test-backup.db");
+        std::fs::write(&backup_file, b"stand-in").expect("写备份替身");
+        let backup = backup_file.to_string_lossy().to_string();
         conn.execute_batch(&format!(
             "INSERT INTO settings (key, value) VALUES ('networking_enabled', 'true');
              INSERT INTO ai_platforms
@@ -1312,9 +1317,11 @@ mod tests {
             [],
         )
         .expect("写采集审计");
+        let watch_roots = serde_json::to_string(&[fixture_dir.to_string_lossy().to_string()])
+            .expect("序列化关注目录");
         conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('capture.watch_roots', '[\"/tmp\"]')",
-            [],
+            "INSERT INTO settings (key, value) VALUES ('capture.watch_roots', ?1)",
+            rusqlite::params![watch_roots],
         )
         .expect("写关注目录");
     }

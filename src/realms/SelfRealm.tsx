@@ -23,6 +23,8 @@ import type {
   DataScope,
   ExportOutcome,
   LlmCall,
+  MasterSummary,
+  ModelProbeOutcome,
   PlatformView,
   PrincipleSeal,
   RingOverview,
@@ -70,6 +72,76 @@ const CREDENTIAL_SCOPES: readonly { readonly scope: string; readonly label: stri
   { scope: "connector", label: "外部数据源" },
 ];
 
+/** 平台表单草稿。单价按元 / 千 token 填写，内核按百万分之一元记账。 */
+type PlatformDraft = {
+  code: string;
+  displayName: string;
+  endpoint: string;
+  modelName: string;
+  inputPrice: string;
+  outputPrice: string;
+  currency: string;
+};
+
+const EMPTY_PLATFORM_DRAFT: PlatformDraft = {
+  code: "",
+  displayName: "",
+  endpoint: "",
+  modelName: "",
+  inputPrice: "",
+  outputPrice: "",
+  currency: "CNY",
+};
+
+/** 单价留空按零计；非数字或负数判为填写有误。 */
+function parsePrice(value: string): number | null {
+  const text = value.trim();
+  if (!text) {
+    return 0;
+  }
+  const amount = Number(text);
+  if (!Number.isFinite(amount) || amount < 0) {
+    return null;
+  }
+  return Math.round(amount * 1_000_000);
+}
+
+/** 已有单价回填成元的写法；零价不占位。 */
+function priceToInput(micros: number): string {
+  return micros > 0 ? String(micros / 1_000_000) : "";
+}
+
+/** 探针退出码对应的可读原因，便于照着结论去修。 */
+const PROBE_EXIT_LABEL: Record<number, string> = {
+  0: "连通正常",
+  1: "模型不可用",
+  2: "联网能力没开",
+  3: "还没配置平台",
+};
+
+/** 体检清单的一项。required 为真表示它是跑通会诊的门槛。 */
+type CheckupItem = {
+  readonly key: string;
+  readonly label: string;
+  readonly state: string;
+  readonly hint: string;
+  readonly ok: boolean;
+  readonly required: boolean;
+};
+
+/** 数必备项里已就绪或未就绪的条数。 */
+function countRequired(items: readonly CheckupItem[], ok: boolean): number {
+  return items.filter((item) => item.required && item.ok === ok).length;
+}
+
+/** 历史回顾的合并时间轴：各来源的列表本身是截断的，这里只回顾最近发生的事。 */
+type HistoryEntry = {
+  readonly id: string;
+  readonly at: string;
+  readonly source: string;
+  readonly detail: string;
+};
+
 const COST_POLICY_LABELS: Record<string, string> = {
   reject: "不发起这次会诊",
   reduce_rounds: "减少讨论轮数",
@@ -94,26 +166,54 @@ function auditActionLabel(action: string): string {
 /**
  * 我：成长与设置。P1 阶段先接入运行信息，成长轨迹在 P5 接入。
  */
-/** 「我」分两处看：成长是每天会用的内容，系统是低频的设置与数据。 */
+/** 「我」分两处看：成长是每天会用的内容，设置是低频的配置、用量与历史。 */
 type SelfView = "growth" | "system";
+
+/** 设置页的分区，顺序就是面板顺序；上面那排跳转按钮按这里生成。 */
+const SETTING_SECTIONS: readonly { readonly id: string; readonly label: string }[] = [
+  { id: "setting-checkup", label: "体检清单" },
+  { id: "setting-history", label: "历史回顾" },
+  { id: "setting-models", label: "联网与模型平台" },
+  { id: "setting-sources", label: "外部数据源" },
+  { id: "setting-usage", label: "用量" },
+  { id: "setting-tuning", label: "调参" },
+  { id: "setting-backup", label: "备份与恢复" },
+  { id: "setting-data", label: "数据主权" },
+  { id: "setting-appearance", label: "外观" },
+  { id: "setting-runtime", label: "运行信息" },
+];
 
 export function SelfRealm({
   theme,
   onThemeChange,
   preferences,
   onPreferencesChange,
+  view,
+  onViewChange,
 }: {
   readonly theme: ThemeName;
   readonly onThemeChange: (next: ThemeName) => void;
   readonly preferences: Preferences;
   readonly onPreferencesChange: (patch: Partial<Preferences>) => void;
+  /** 外壳指定看哪一处（顶部「设置」按钮直进设置）；不传就自己管。 */
+  readonly view?: SelfView;
+  readonly onViewChange?: (next: SelfView) => void;
 }) {
   const db = useCommand("db_status", {});
   const app = useCommand("app_info", {});
   const client = useCommands();
-  const [selfView, setSelfView] = useState<SelfView>("growth");
+  const [innerView, setInnerView] = useState<SelfView>("growth");
+  const selfView = view ?? innerView;
+  function showView(next: SelfView) {
+    setInnerView(next);
+    onViewChange?.(next);
+  }
   const [networking, setNetworking] = useState<boolean | null>(null);
   const [platforms, setPlatforms] = useState<readonly PlatformView[]>([]);
+  const [platformDraft, setPlatformDraft] = useState<PlatformDraft>(EMPTY_PLATFORM_DRAFT);
+  const [platformNote, setPlatformNote] = useState<string | null>(null);
+  const [probe, setProbe] = useState<ModelProbeOutcome | null>(null);
+  const [probeNote, setProbeNote] = useState<string | null>(null);
   const [calls, setCalls] = useState<readonly LlmCall[]>([]);
   const [records, setRecords] = useState<readonly ThoughtRecord[]>([]);
   const [chain, setChain] = useState<readonly ThoughtRecord[]>([]);
@@ -155,7 +255,8 @@ export function SelfRealm({
   const [cost, setCost] = useState<CostSummary | null>(null);
   const [estimate, setEstimate] = useState<CostEstimate | null>(null);
   const [backups, setBackups] = useState<readonly BackupView[]>([]);
-  const [costNote, setCostNote] = useState<string | null>(null);
+  const [masters, setMasters] = useState<readonly MasterSummary[]>([]);
+  const [backupNote, setBackupNote] = useState<string | null>(null);
   const [credentialScope, setCredentialScope] = useState("platform");
   const [credentialOwner, setCredentialOwner] = useState("");
   const [credentialSecret, setCredentialSecret] = useState("");
@@ -168,7 +269,7 @@ export function SelfRealm({
   >([]);
 
   const refresh = useCallback(async () => {
-    const [enabled, platformList, recent, recordList, runList, companionState, topicList, sealList, overview, captureState, captureList, captureLog, selfState, draftDetail, scope, events, connectorList, connectorLog, costState, costEstimate, backupList] = await Promise.all([
+    const [enabled, platformList, recent, recordList, runList, companionState, topicList, sealList, overview, captureState, captureList, captureLog, selfState, draftDetail, scope, events, connectorList, connectorLog, costState, costEstimate, backupList, masterList] = await Promise.all([
       client.call("networking_get", {}),
       client.call("platform_list", {}),
       client.call("llm_calls", { limit: 5 }),
@@ -190,6 +291,7 @@ export function SelfRealm({
       client.call("cost_summary", { days: 30 }),
       client.call("cost_estimate", {}),
       client.call("backup_list", { limit: 10 }),
+      client.call("master_list", {}),
     ]);
     setNetworking(enabled);
     setPlatforms(platformList);
@@ -212,6 +314,21 @@ export function SelfRealm({
     setCost(costState);
     setEstimate(costEstimate);
     setBackups(backupList);
+    setMasters(masterList);
+
+    // 体检清单要按平台代码逐个数密钥；密钥库不可用只是这一项未知，不能把整页读取带崩。
+    const knownKeys = await Promise.all(
+      platformList.map(
+        async (platform) =>
+          [
+            `platform:${platform.code}`,
+            await client
+              .call("credential_status", { scope: "platform", ownerId: platform.code })
+              .catch(() => false),
+          ] as const,
+      ),
+    );
+    setCredentialKnown((current) => ({ ...current, ...Object.fromEntries(knownKeys) }));
   }, [client]);
 
   useEffect(() => {
@@ -240,6 +357,126 @@ export function SelfRealm({
   function draftOf(item: TuningItem): string {
     return tuningDraft[item.key] ?? item.value;
   }
+
+  /** 体检清单：必备项决定能不能跑通会诊，其余只是提醒。 */
+  function checkupItems(): readonly CheckupItem[] {
+    const enabledPlatforms = platforms.filter((item) => item.enabled);
+    const missingKeys = enabledPlatforms.filter(
+      (item) => !credentialKnown[`platform:${item.code}`],
+    );
+    const openCaptures = capture
+      ? capture.capabilities.filter((item) => item.enabled && item.available).length
+      : 0;
+    const presentBackups = backups.filter((item) => item.present).length;
+    return [
+      {
+        key: "networking",
+        label: "联网能力",
+        ok: networking === true,
+        required: true,
+        state: networking === true ? "已开启" : "已关闭",
+        hint:
+          networking === true
+            ? "每次提问都会留下记录，费用也按这里记账"
+            : "关着的时候，模型与外部数据源都调不动",
+      },
+      {
+        key: "platform",
+        label: "模型平台",
+        ok: enabledPlatforms.length > 0,
+        required: true,
+        state:
+          platforms.length === 0
+            ? "还没配置"
+            : enabledPlatforms.length > 0
+              ? `已启用 ${enabledPlatforms.length} 个`
+              : "已配置，未启用",
+        hint:
+          platforms.length === 0
+            ? "在下面「大模型」里填服务地址与模型名"
+            : "确认要用的那个已经启用",
+      },
+      {
+        key: "credential",
+        label: "平台密钥",
+        ok: enabledPlatforms.length > 0 && missingKeys.length === 0,
+        required: true,
+        state:
+          enabledPlatforms.length === 0
+            ? "等启用平台后再看"
+            : missingKeys.length === 0
+              ? "已写入"
+              : `缺 ${missingKeys.map((item) => item.code).join("、")}`,
+        hint: "密钥存系统密钥库，条目名按 thought-forge/platform/平台代码",
+      },
+      {
+        key: "masters",
+        label: "大师包",
+        ok: masters.length > 0,
+        required: true,
+        state: masters.length > 0 ? `已装 ${masters.length} 位` : "未安装",
+        hint:
+          masters.length > 0
+            ? "会诊的可选席位来自这里"
+            : "去「藏」境界点「安装种子大师包」",
+      },
+      {
+        key: "capture",
+        label: "采集",
+        ok: openCaptures > 0,
+        required: false,
+        state: capture
+          ? capture.paused
+            ? `暂停中（已开 ${openCaptures} 项）`
+            : openCaptures > 0
+              ? `已开 ${openCaptures} 项`
+              : "全关"
+          : "读取中",
+        hint: "默认全关。要用再开，不用就关掉，少攒无关数据",
+      },
+      {
+        key: "backup",
+        label: "备份",
+        ok: presentBackups > 0,
+        required: false,
+        state: presentBackups > 0 ? `有 ${presentBackups} 份` : "还没有",
+        hint: "动手实测前先备一份，出问题能退回来",
+      },
+    ];
+  }
+
+  const checkup = checkupItems();
+  const presentBackups = backups.filter((item) => item.present).length;
+  const history: readonly HistoryEntry[] = [
+    ...captures.map((item) => ({
+      id: `capture-${item.id}`,
+      at: item.occurredAt,
+      source: "采集",
+      detail: `${captureKindLabel(item.kind)} · ${item.sourceApp || "来源未知"}`,
+    })),
+    ...calls.map((item) => ({
+      id: `call-${item.id}`,
+      at: item.createdAt,
+      source: "模型调用",
+      detail: `${callPurposeLabel(item.purpose)} · ${callStatusLabel(item.status)} · ${
+        item.modelName || item.platformCode
+      }`,
+    })),
+    ...backups.map((item) => ({
+      id: `backup-${item.id}`,
+      at: item.createdAt,
+      source: "备份",
+      detail: `${formatBytes(item.sizeBytes)}${item.present ? "" : " · 文件已不在原处"}`,
+    })),
+    ...dataEvents.map((item) => ({
+      id: `data-${item.id}`,
+      at: item.createdAt,
+      source: "数据留痕",
+      detail: `${item.kindLabel} · ${item.rowCount} 条`,
+    })),
+  ]
+    .sort((left, right) => (left.at < right.at ? 1 : left.at > right.at ? -1 : 0))
+    .slice(0, 12);
 
   /** 只有越界或格式不对才算无效，交给用户明确看到问题再改。 */
   function invalidOf(item: TuningItem): boolean {
@@ -298,6 +535,79 @@ export function SelfRealm({
       setPlatforms(await client.call("platform_list", {}));
     } catch (cause) {
       setNote(cause instanceof Error ? cause.message : "平台配置更新失败");
+    }
+  }
+
+  function patchPlatformDraft(patch: Partial<PlatformDraft>) {
+    setPlatformDraft((current) => ({ ...current, ...patch }));
+  }
+
+  /** 编辑已有平台：把现值填进表单，再保存即覆盖同代码的记录。 */
+  function editPlatform(platform: PlatformView) {
+    setPlatformDraft({
+      code: platform.code,
+      displayName: platform.displayName,
+      endpoint: platform.endpoint,
+      modelName: platform.modelName,
+      inputPrice: priceToInput(platform.inputPriceMicrosPer1k),
+      outputPrice: priceToInput(platform.outputPriceMicrosPer1k),
+      currency: platform.currency || "CNY",
+    });
+    setPlatformNote(null);
+  }
+
+  async function savePlatform() {
+    const code = platformDraft.code.trim();
+    const endpoint = platformDraft.endpoint.trim();
+    const modelName = platformDraft.modelName.trim();
+    if (!code) {
+      setPlatformNote("先填平台代码，密钥条目按它命名");
+      return;
+    }
+    if (!endpoint || !modelName) {
+      setPlatformNote("服务地址与模型名都填上才能保存");
+      return;
+    }
+    const inputPrice = parsePrice(platformDraft.inputPrice);
+    const outputPrice = parsePrice(platformDraft.outputPrice);
+    if (inputPrice === null || outputPrice === null) {
+      setPlatformNote("单价只能填非负数字，不清楚就留空");
+      return;
+    }
+    setPlatformNote(null);
+    setBusy(true);
+    try {
+      const saved = await client.call("platform_upsert", {
+        code,
+        displayName: platformDraft.displayName.trim() || code,
+        endpoint,
+        modelName,
+        inputPriceMicrosPer1k: inputPrice,
+        outputPriceMicrosPer1k: outputPrice,
+        currency: platformDraft.currency.trim() || "CNY",
+      });
+      setPlatforms((current) => [
+        ...current.filter((item) => item.code !== saved.code),
+        saved,
+      ]);
+      setPlatformNote(
+        `已保存 ${saved.displayName}。密钥按代码 ${saved.code} 写进下面的「密钥」里。`,
+      );
+    } catch (cause) {
+      setPlatformNote(cause instanceof Error ? cause.message : "平台没能保存");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** 外壳自检：用一次最小调用判定当前平台是否真的能连上。 */
+  async function probeModel() {
+    setProbeNote(null);
+    try {
+      setProbe(await client.call("model_probe", {}));
+    } catch (cause) {
+      setProbe(null);
+      setProbeNote(cause instanceof Error ? cause.message : "探针没能执行");
     }
   }
 
@@ -427,26 +737,26 @@ export function SelfRealm({
 
   /** 创建一份备份，并刷新保留策略下的备份列表。 */
   async function createBackup() {
-    setCostNote(null);
+    setBackupNote(null);
     try {
       const created: BackupOutcome = await client.call("backup_create", {});
       setBackups(await client.call("backup_list", { limit: 10 }));
-      setCostNote(
+      setBackupNote(
         `已创建备份 · ${formatBytes(created.sizeBytes)} · 数据格式版本 ${created.schemaVersion}`,
       );
     } catch (cause) {
-      setCostNote(cause instanceof Error ? cause.message : "没能生成备份");
+      setBackupNote(cause instanceof Error ? cause.message : "没能生成备份");
     }
   }
 
   /** 恢复前由内核先校验完整性，校验通过才替换数据文件。 */
   async function restoreBackup(backup: BackupView) {
-    setCostNote(null);
+    setBackupNote(null);
     try {
       await client.call("backup_restore", { path: backup.path });
-      setCostNote("备份已校验并恢复，重启应用后生效");
+      setBackupNote("备份已校验并恢复，重启应用后生效");
     } catch (cause) {
-      setCostNote(cause instanceof Error ? cause.message : "没能恢复数据");
+      setBackupNote(cause instanceof Error ? cause.message : "没能恢复数据");
     }
   }
 
@@ -750,7 +1060,7 @@ export function SelfRealm({
           role="tab"
           aria-selected={selfView === "growth"}
           data-on={selfView === "growth"}
-          onClick={() => setSelfView("growth")}
+          onClick={() => showView("growth")}
         >
           成长
         </button>
@@ -759,85 +1069,118 @@ export function SelfRealm({
           role="tab"
           aria-selected={selfView === "system"}
           data-on={selfView === "system"}
-          onClick={() => setSelfView("system")}
+          onClick={() => showView("system")}
         >
-          系统
+          设置
         </button>
       </div>
-      <section className="panel" hidden={selfView !== "system"}>
-        <h2 className="section-head">外观</h2>
-        <div className="setting-row">
-          <span className="setting-row__label">主题</span>
-          <ThemeToggle theme={theme} onChange={onThemeChange} />
-        </div>
+      {/* 设置一页放不下，给一排分区按钮，点了直接跳到对应面板。 */}
+      {/* 这里用条件渲染而不是 hidden：导航自己设了 display: flex，会盖掉 hidden 的默认隐藏。 */}
+      {selfView === "system" ? (
+        <nav className="setting-nav" aria-label="设置分区">
+          {SETTING_SECTIONS.map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              aria-controls={section.id}
+              onClick={() => {
+                document.getElementById(section.id)?.scrollIntoView?.({ block: "start" });
+              }}
+            >
+              {section.label}
+            </button>
+          ))}
+        </nav>
+      ) : null}
+      <section className="panel" id="setting-checkup" hidden={selfView !== "system"}>
+        <h2 className="section-head">体检清单</h2>
         <p className="setting-row__hint">
-          换主题只换配色，不会打乱布局，也不会重新加载画布。
+          必备 {countRequired(checkup, true) + countRequired(checkup, false)} 项里已就绪{" "}
+          {countRequired(checkup, true)} 项
+          {countRequired(checkup, false) === 0
+            ? "，可以开始实测了。"
+            : "，还差下面标红的那几项。"}
         </p>
-        <div className="setting-row">
-          <span className="setting-row__label">降低动态效果</span>
-          <button
-            className="switch"
-            type="button"
-            role="switch"
-            aria-label="降低动态效果"
-            aria-checked={preferences.reduceMotion}
-            data-on={preferences.reduceMotion}
-            onClick={() =>
-              onPreferencesChange({ reduceMotion: !preferences.reduceMotion })
-            }
-          >
-            {preferences.reduceMotion ? "已开启" : "已关闭"}
-          </button>
-        </div>
-        <p className="setting-row__hint">
-          开启后不再飘动粒子、不再有背景呼吸感，状态与位置的变化照常显示。
-        </p>
-        <div className="setting-row">
-          <span className="setting-row__label">高对比模式</span>
-          <button
-            className="switch"
-            type="button"
-            role="switch"
-            aria-label="高对比模式"
-            aria-checked={preferences.highContrast}
-            data-on={preferences.highContrast}
-            onClick={() =>
-              onPreferencesChange({ highContrast: !preferences.highContrast })
-            }
-          >
-            {preferences.highContrast ? "已开启" : "已关闭"}
-          </button>
-        </div>
-        <p className="setting-row__hint">
-          开启后文字与边线更清晰，每一层靠不同形状区分，不靠颜色分辨。
-        </p>
-      </section>
+        <ul className="checkups">
+          {checkup.map((item) => (
+            <li key={item.key} className="checkup" data-ok={item.ok}>
+              <span className="checkup__label">{item.label}</span>
+              <span className="checkup__state mono">{item.state}</span>
+              <span className="checkup__hint">
+                {item.hint}
+                {item.required ? "" : "（可选，不算门槛）"}
+              </span>
+            </li>
+          ))}
+        </ul>
 
-      <section className="panel" hidden={selfView !== "system"}>
-        <h2 className="section-head">运行信息</h2>
-        <dl className="kv">
-          <div className="kv__row">
-            <dt>版本</dt>
-            <dd className="mono">{app.data?.version ?? "读取中"}</dd>
+        <h3 className="section-head section-head--minor">使用概览</h3>
+        {cost ? (
+          <div className="cost-grid">
+            <div className="cost-cell">
+              <span className="cost-cell__label">今日花费</span>
+              <span className="cost-cell__value mono">
+                {formatMoney(cost.todayMicros, cost.currency)}
+              </span>
+              <span className="cost-cell__note mono">
+                上限{" "}
+                {cost.dailyLimitMicros > 0
+                  ? formatMoney(cost.dailyLimitMicros, cost.currency)
+                  : "不限"}
+              </span>
+            </div>
+            <div className="cost-cell">
+              <span className="cost-cell__label">本月花费</span>
+              <span className="cost-cell__value mono">
+                {formatMoney(cost.monthMicros, cost.currency)}
+              </span>
+              <span className="cost-cell__note mono">
+                上限{" "}
+                {cost.monthlyLimitMicros > 0
+                  ? formatMoney(cost.monthlyLimitMicros, cost.currency)
+                  : "不限"}
+              </span>
+            </div>
+            <div className="cost-cell">
+              <span className="cost-cell__label">已装大师</span>
+              <span className="cost-cell__value mono">{masters.length} 位</span>
+              <span className="cost-cell__note">会诊席位来自这里</span>
+            </div>
+            <div className="cost-cell">
+              <span className="cost-cell__label">备份</span>
+              <span className="cost-cell__value mono">{presentBackups} 份</span>
+              <span className="cost-cell__note">完整明细在「数据与备份」</span>
+            </div>
           </div>
-          <div className="kv__row">
-            <dt>数据格式版本</dt>
-            <dd className="mono">{db.data?.schemaVersion ?? "读取中"}</dd>
-          </div>
-          <div className="kv__row">
-            <dt>数据写入方式</dt>
-            <dd className="mono">{db.data?.journalMode ?? "读取中"}</dd>
-          </div>
-          <div className="kv__row">
-            <dt>数据位置</dt>
-            <dd className="mono">{db.data?.path ?? "读取中"}</dd>
-          </div>
-        </dl>
-        {db.error ? (
-          <p className="setting-row__hint" data-tone="warn">
-            数据还没准备好：{db.error.message}
+        ) : (
+          <p className="setting-row__hint">用量读取中。</p>
+        )}
+        {cost && !cost.priced ? (
+          <p className="setting-row__hint">
+            单价还没填，费用按零计。在下面「大模型」里填了单价，估算才会反映真实开销。
           </p>
         ) : null}
+      </section>
+
+      <section className="panel" id="setting-history" hidden={selfView !== "system"}>
+        <h2 className="section-head">历史回顾</h2>
+        <p className="setting-row__hint">
+          最近发生过的事按时间倒序放一条流水：采集、模型调用、备份、数据留痕。
+          每类完整的明细仍在各自面板里（模型调用记录、采集台、数据与备份、数据主权）。
+        </p>
+        {history.length === 0 ? (
+          <p className="setting-row__hint">还没有可回顾的事。</p>
+        ) : (
+          <ul className="calls">
+            {history.map((entry) => (
+              <li key={entry.id} className="call">
+                <span className="mono">{formatTime(entry.at)}</span>
+                <span>{entry.source}</span>
+                <span>{entry.detail}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="panel" hidden={selfView !== "growth"}>
@@ -1004,7 +1347,7 @@ export function SelfRealm({
         ) : null}
       </section>
 
-      <section className="panel" hidden={selfView !== "system"}>
+      <section className="panel" id="setting-models" hidden={selfView !== "system"}>
         <h2 className="section-head">联网与模型平台</h2>
         <div className="setting-row">
           <span className="setting-row__label">联网能力</span>
@@ -1021,9 +1364,9 @@ export function SelfRealm({
           </button>
         </div>
         <p className="setting-row__hint">
-          默认关闭。开启后每次向模型提问都会留下记录。密钥不从界面填写，
-          改由系统环境变量 <span className="mono">THOUGHT_FORGE_API_KEY</span> 提供，
-          只存在本机环境里。
+          默认关闭。开启后每次向模型提问都会留下记录。密钥不进数据库：写进系统密钥库，
+          条目名是 <span className="mono">thought-forge/platform/平台代码</span>；
+          系统密钥库不可用时退回环境变量 <span className="mono">THOUGHT_FORGE_API_KEY</span>。
         </p>
         <ul className="platforms">
           {platforms.map((platform) => (
@@ -1035,25 +1378,222 @@ export function SelfRealm({
               <span className="platform__endpoint mono">
                 {platform.endpoint || "还没填服务地址"}
               </span>
-              <button
-                className="platform__toggle"
-                type="button"
-                aria-pressed={platform.enabled}
-                onClick={() => void togglePlatform(platform)}
-              >
-                {platform.enabled ? "停用" : "启用"}
-              </button>
+              <div className="platform__actions">
+                <button
+                  className="platform__toggle"
+                  type="button"
+                  aria-pressed={platform.enabled}
+                  onClick={() => void togglePlatform(platform)}
+                >
+                  {platform.enabled ? "停用" : "启用"}
+                </button>
+                <button
+                  className="platform__toggle"
+                  type="button"
+                  onClick={() => editPlatform(platform)}
+                >
+                  编辑
+                </button>
+              </div>
             </li>
           ))}
         </ul>
+
+        <h3 className="section-head section-head--minor">新增或修改平台</h3>
+        <p className="setting-row__hint">
+          服务地址要填到接口那一段（形如
+          <span className="mono">https://api.deepseek.com/chat/completions</span>），
+          只填域名会连不上。平台代码同时是密钥条目名，下面的「密钥」里归属要填同一个代码。
+          单价按元 / 千 token 计，不清楚就留空，按零计。
+        </p>
+        <div className="setting-row">
+          <label className="setting-row__label" htmlFor="platform-code">
+            平台代码
+          </label>
+          <input
+            id="platform-code"
+            className="connector-input"
+            value={platformDraft.code}
+            placeholder="如 deepseek"
+            onChange={(event) => patchPlatformDraft({ code: event.target.value })}
+          />
+        </div>
+        <div className="setting-row">
+          <label className="setting-row__label" htmlFor="platform-name">
+            显示名
+          </label>
+          <input
+            id="platform-name"
+            className="connector-input"
+            value={platformDraft.displayName}
+            placeholder="留空就用平台代码"
+            onChange={(event) => patchPlatformDraft({ displayName: event.target.value })}
+          />
+        </div>
+        <div className="setting-row">
+          <label className="setting-row__label" htmlFor="platform-endpoint">
+            服务地址
+          </label>
+          <input
+            id="platform-endpoint"
+            className="connector-input"
+            value={platformDraft.endpoint}
+            placeholder="如 https://api.deepseek.com/chat/completions"
+            onChange={(event) => patchPlatformDraft({ endpoint: event.target.value })}
+          />
+        </div>
+        <div className="setting-row">
+          <label className="setting-row__label" htmlFor="platform-model">
+            模型名
+          </label>
+          <input
+            id="platform-model"
+            className="connector-input"
+            value={platformDraft.modelName}
+            placeholder="如 deepseek-chat"
+            onChange={(event) => patchPlatformDraft({ modelName: event.target.value })}
+          />
+        </div>
+        <div className="setting-row">
+          <label className="setting-row__label" htmlFor="platform-input-price">
+            输入单价
+          </label>
+          <input
+            id="platform-input-price"
+            className="connector-input"
+            value={platformDraft.inputPrice}
+            placeholder="元 / 千 token，可留空"
+            onChange={(event) => patchPlatformDraft({ inputPrice: event.target.value })}
+          />
+        </div>
+        <div className="setting-row">
+          <label className="setting-row__label" htmlFor="platform-output-price">
+            输出单价
+          </label>
+          <input
+            id="platform-output-price"
+            className="connector-input"
+            value={platformDraft.outputPrice}
+            placeholder="元 / 千 token，可留空"
+            onChange={(event) => patchPlatformDraft({ outputPrice: event.target.value })}
+          />
+        </div>
+        <div className="credential-actions">
+          <button
+            className="connector-save"
+            type="button"
+            disabled={busy}
+            onClick={() => void savePlatform()}
+          >
+            保存平台
+          </button>
+          <button
+            className="connector__test"
+            type="button"
+            onClick={() => void probeModel()}
+          >
+            测试连通
+          </button>
+        </div>
+        {platformNote ? (
+          <p className="setting-row__hint" data-tone="warn">
+            {platformNote}
+          </p>
+        ) : null}
+        {probeNote ? (
+          <p className="setting-row__hint" data-tone="warn">
+            {probeNote}
+          </p>
+        ) : null}
+        {probe ? (
+          <p className="setting-row__hint" data-tone={probe.ok ? undefined : "warn"}>
+            {[
+              `探针${PROBE_EXIT_LABEL[probe.exitCode] ?? `退出码 ${probe.exitCode}`}`,
+              `${probe.platformCode || "未配置平台"} / ${probe.modelName || "未选模型"}`,
+              `耗时 ${formatDuration(probe.latencyMs)}`,
+              probe.callId ? `审计 ${probe.callId}` : "",
+              probe.errorCode ? `错误码 ${probe.errorCode}` : "",
+            ]
+              .filter((part) => part !== "")
+              .join("，")}
+          </p>
+        ) : null}
         {note ? (
           <p className="setting-row__hint" data-tone="warn">
             {note}
           </p>
         ) : null}
+
+        <h3 className="section-head section-head--minor">密钥</h3>
+        <p className="setting-row__hint">
+          密钥存进系统密钥库，这里只记住它的名字，不会保存密钥本身。
+          平台密钥的归属填平台代码，条目名就是 thought-forge/platform/平台代码。
+        </p>
+        <div className="setting-row">
+          <label className="setting-row__label" htmlFor="credential-scope">
+            范围
+          </label>
+          <select
+            id="credential-scope"
+            className="connector-input"
+            value={credentialScope}
+            onChange={(event) => setCredentialScope(event.target.value)}
+          >
+            {CREDENTIAL_SCOPES.map((item) => (
+              <option key={item.scope} value={item.scope}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="setting-row">
+          <label className="setting-row__label" htmlFor="credential-owner">
+            归属
+          </label>
+          <input
+            id="credential-owner"
+            className="connector-input"
+            value={credentialOwner}
+            placeholder="平台代码或外部数据源名"
+            onChange={(event) => setCredentialOwner(event.target.value)}
+          />
+        </div>
+        <div className="setting-row">
+          <label className="setting-row__label" htmlFor="credential-secret">
+            密钥
+          </label>
+          <input
+            id="credential-secret"
+            className="connector-input"
+            type="password"
+            value={credentialSecret}
+            placeholder="只在写入时出现，不落库"
+            onChange={(event) => setCredentialSecret(event.target.value)}
+          />
+        </div>
+        <div className="credential-actions">
+          <button className="connector-save" type="button" onClick={() => void saveCredential()}>
+            保存密钥
+          </button>
+          <button className="connector__test" type="button" onClick={() => void checkCredential()}>
+            查询状态
+          </button>
+          {credentialOwner.trim() ? (
+            <span className="credential-state mono">
+              {credentialKnown[`${credentialScope}:${credentialOwner.trim()}`]
+                ? "已配置"
+                : "未配置"}
+            </span>
+          ) : null}
+        </div>
+        {credentialNote ? (
+          <p className="setting-row__hint" data-tone="warn">
+            {credentialNote}
+          </p>
+        ) : null}
       </section>
 
-      <section className="panel" hidden={selfView !== "system"}>
+      <section className="panel" id="setting-sources" hidden={selfView !== "system"}>
         <h2 className="section-head">外部数据源</h2>
         <p className="setting-row__hint">
           联网搜索与网页阅读在这里逐项开启，默认全部关闭。每次搜索都会留下记录；
@@ -1220,8 +1760,12 @@ export function SelfRealm({
         )}
       </section>
 
-      <section className="panel" hidden={selfView !== "system"}>
-        <h2 className="section-head">模型调用记录</h2>
+      <section className="panel" id="setting-usage" hidden={selfView !== "system"}>
+        <h2 className="section-head">用量</h2>
+        <p className="setting-row__hint">
+          模型调用的流水与费用。外部数据源的调用次数跟着数据源配置放在「外部数据源」里。
+        </p>
+        <h3 className="section-head section-head--minor">模型调用</h3>
         {calls.length === 0 ? (
           <p className="setting-row__hint">还没有向模型提问的记录。</p>
         ) : (
@@ -1242,10 +1786,7 @@ export function SelfRealm({
             ))}
           </ul>
         )}
-      </section>
-
-      <section className="panel" hidden={selfView !== "system"}>
-        <h2 className="section-head">成本与配额</h2>
+        <h3 className="section-head section-head--minor">费用与配额</h3>
         <p className="setting-row__hint">
           每次模型与外部数据源的调用都会按实际用量记账，按自然日汇总。
           花到上限之后怎么办，在「调参」里设置。
@@ -1301,115 +1842,7 @@ export function SelfRealm({
             还没有配置任何单价，费用按零计。填写平台单价后估算才会反映真实开销。
           </p>
         ) : null}
-        {costNote ? (
-          <p className="setting-row__hint" data-tone="warn">
-            {costNote}
-          </p>
-        ) : null}
 
-        <h3 className="section-head section-head--minor">密钥</h3>
-        <p className="setting-row__hint">
-          密钥存进系统密钥库，这里只记住它的名字，不会保存密钥本身。
-        </p>
-        <div className="setting-row">
-          <label className="setting-row__label" htmlFor="credential-scope">
-            范围
-          </label>
-          <select
-            id="credential-scope"
-            className="connector-input"
-            value={credentialScope}
-            onChange={(event) => setCredentialScope(event.target.value)}
-          >
-            {CREDENTIAL_SCOPES.map((item) => (
-              <option key={item.scope} value={item.scope}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="setting-row">
-          <label className="setting-row__label" htmlFor="credential-owner">
-            归属
-          </label>
-          <input
-            id="credential-owner"
-            className="connector-input"
-            value={credentialOwner}
-            placeholder="平台名或外部数据源名"
-            onChange={(event) => setCredentialOwner(event.target.value)}
-          />
-        </div>
-        <div className="setting-row">
-          <label className="setting-row__label" htmlFor="credential-secret">
-            密钥
-          </label>
-          <input
-            id="credential-secret"
-            className="connector-input"
-            type="password"
-            value={credentialSecret}
-            placeholder="只在写入时出现，不落库"
-            onChange={(event) => setCredentialSecret(event.target.value)}
-          />
-        </div>
-        <div className="credential-actions">
-          <button className="connector-save" type="button" onClick={() => void saveCredential()}>
-            保存密钥
-          </button>
-          <button className="connector__test" type="button" onClick={() => void checkCredential()}>
-            查询状态
-          </button>
-          {credentialOwner.trim() ? (
-            <span className="credential-state mono">
-              {credentialKnown[`${credentialScope}:${credentialOwner.trim()}`]
-                ? "已配置"
-                : "未配置"}
-            </span>
-          ) : null}
-        </div>
-        {credentialNote ? (
-          <p className="setting-row__hint" data-tone="warn">
-            {credentialNote}
-          </p>
-        ) : null}
-
-        <h3 className="section-head section-head--minor">备份与恢复</h3>
-        <p className="setting-row__hint">
-          备份会产出一份完整的数据文件，恢复前先校验完整性；数据格式升级前会自动备份一次，
-          超出保留份数的旧备份会标记为已移除。
-        </p>
-        <button className="connector-save" type="button" onClick={() => void createBackup()}>
-          立即备份
-        </button>
-        {backups.length === 0 ? (
-          <p className="setting-row__hint">还没有备份记录。</p>
-        ) : (
-          <ul className="backups">
-            {backups.map((backup) => (
-              <li key={backup.id} className="backup" data-present={backup.present}>
-                <div className="backup__head">
-                  <span className="backup__kind">
-                    {backup.kind === "pre_migration" ? "升级前自动备份" : "手动备份"}
-                  </span>
-                  <span className="backup__time">{formatTime(backup.createdAt)}</span>
-                </div>
-                <span className="backup__path mono">{backup.path}</span>
-                <span className="backup__meta">
-                  {formatBytes(backup.sizeBytes)} · 数据格式版本 {backup.schemaVersion}
-                </span>
-                <button
-                  className="connector__test"
-                  type="button"
-                  disabled={!backup.present}
-                  onClick={() => void restoreBackup(backup)}
-                >
-                  {backup.present ? "校验并恢复" : "已移除"}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
 
       <section className="panel" hidden={selfView !== "growth"}>
@@ -1755,7 +2188,7 @@ export function SelfRealm({
         ) : null}
       </section>
 
-      <section className="panel" hidden={selfView !== "system"}>
+      <section className="panel" id="setting-tuning" hidden={selfView !== "system"}>
         <h2 className="section-head">调参</h2>
         <p className="setting-row__hint">
           这些数字原本写死在程序里，现在交给你。越界或格式不对的取值整批不会生效。
@@ -2062,7 +2495,51 @@ export function SelfRealm({
         </div>
       </section>
 
-      <section className="panel" hidden={selfView !== "system"}>
+      <section className="panel" id="setting-backup" hidden={selfView !== "system"}>
+        <h2 className="section-head">备份与恢复</h2>
+        <p className="setting-row__hint">
+          备份会产出一份完整的数据文件，恢复前先校验完整性；数据格式升级前会自动备份一次，
+          超出保留份数的旧备份会标记为已移除。
+        </p>
+        <button className="connector-save" type="button" onClick={() => void createBackup()}>
+          立即备份
+        </button>
+        {backupNote ? (
+          <p className="setting-row__hint" data-tone="warn">
+            {backupNote}
+          </p>
+        ) : null}
+        {backups.length === 0 ? (
+          <p className="setting-row__hint">还没有备份记录。</p>
+        ) : (
+          <ul className="backups">
+            {backups.map((backup) => (
+              <li key={backup.id} className="backup" data-present={backup.present}>
+                <div className="backup__head">
+                  <span className="backup__kind">
+                    {backup.kind === "pre_migration" ? "升级前自动备份" : "手动备份"}
+                  </span>
+                  <span className="backup__time">{formatTime(backup.createdAt)}</span>
+                </div>
+                <span className="backup__path mono">{backup.path}</span>
+                <span className="backup__meta">
+                  {formatBytes(backup.sizeBytes)} · 数据格式版本 {backup.schemaVersion}
+                </span>
+                <button
+                  className="connector__test"
+                  type="button"
+                  disabled={!backup.present}
+                  onClick={() => void restoreBackup(backup)}
+                >
+                  {backup.present ? "校验并恢复" : "已移除"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="panel" id="setting-data" hidden={selfView !== "system"}>
         <h2 className="section-head">数据主权</h2>
         <p className="setting-row__hint">
           数据默认只存本机。导出会生成一份可以直接打开的数据文件，不会改动任何内容；
@@ -2135,6 +2612,82 @@ export function SelfRealm({
         ) : (
           <p className="setting-row__hint">读取中</p>
         )}
+      </section>
+
+      <section className="panel" id="setting-appearance" hidden={selfView !== "system"}>
+        <h2 className="section-head">外观</h2>
+        <div className="setting-row">
+          <span className="setting-row__label">主题</span>
+          <ThemeToggle theme={theme} onChange={onThemeChange} />
+        </div>
+        <p className="setting-row__hint">
+          换主题只换配色，不会打乱布局，也不会重新加载画布。
+        </p>
+        <div className="setting-row">
+          <span className="setting-row__label">降低动态效果</span>
+          <button
+            className="switch"
+            type="button"
+            role="switch"
+            aria-label="降低动态效果"
+            aria-checked={preferences.reduceMotion}
+            data-on={preferences.reduceMotion}
+            onClick={() =>
+              onPreferencesChange({ reduceMotion: !preferences.reduceMotion })
+            }
+          >
+            {preferences.reduceMotion ? "已开启" : "已关闭"}
+          </button>
+        </div>
+        <p className="setting-row__hint">
+          开启后不再飘动粒子、不再有背景呼吸感，状态与位置的变化照常显示。
+        </p>
+        <div className="setting-row">
+          <span className="setting-row__label">高对比模式</span>
+          <button
+            className="switch"
+            type="button"
+            role="switch"
+            aria-label="高对比模式"
+            aria-checked={preferences.highContrast}
+            data-on={preferences.highContrast}
+            onClick={() =>
+              onPreferencesChange({ highContrast: !preferences.highContrast })
+            }
+          >
+            {preferences.highContrast ? "已开启" : "已关闭"}
+          </button>
+        </div>
+        <p className="setting-row__hint">
+          开启后文字与边线更清晰，每一层靠不同形状区分，不靠颜色分辨。
+        </p>
+      </section>
+
+      <section className="panel" id="setting-runtime" hidden={selfView !== "system"}>
+        <h2 className="section-head">运行信息</h2>
+        <dl className="kv">
+          <div className="kv__row">
+            <dt>版本</dt>
+            <dd className="mono">{app.data?.version ?? "读取中"}</dd>
+          </div>
+          <div className="kv__row">
+            <dt>数据格式版本</dt>
+            <dd className="mono">{db.data?.schemaVersion ?? "读取中"}</dd>
+          </div>
+          <div className="kv__row">
+            <dt>数据写入方式</dt>
+            <dd className="mono">{db.data?.journalMode ?? "读取中"}</dd>
+          </div>
+          <div className="kv__row">
+            <dt>数据位置</dt>
+            <dd className="mono">{db.data?.path ?? "读取中"}</dd>
+          </div>
+        </dl>
+        {db.error ? (
+          <p className="setting-row__hint" data-tone="warn">
+            数据还没准备好：{db.error.message}
+          </p>
+        ) : null}
       </section>
     </RealmShell>
   );

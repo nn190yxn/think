@@ -12,6 +12,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:release-config": "node scripts/check-release-config.mjs",
+    "gate:front": "pnpm typecheck && pnpm test && pnpm build",
+    "gate:core": "cd src-tauri && cargo test -p thought-forge-core && cargo test -p thought-forge-core --examples && cargo clippy -p thought-forge-core --all-targets -- -D warnings",
+    "gate:shell": "cd src-tauri && cargo test -p thought-forge-desktop --lib && cargo clippy -p thought-forge-desktop --all-targets -- -D warnings",
+    "gate:perf": "cd src-tauri && cargo test -p thought-forge-core -- --ignored",
+    "gate:all": "pnpm gate:front && pnpm gate:core && pnpm gate:shell",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build:windows": "tauri build"

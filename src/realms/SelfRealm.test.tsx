@@ -29,9 +29,9 @@ function renderRealm() {
   );
 }
 
-/** 系统视图放着外观、联网、成本等低频设置，进入前先切到「系统」页。 */
+/** 设置视图放着体检、用量、外观等低频项目，进入前先切到「设置」页。 */
 async function showSystem() {
-  await userEvent.click(await screen.findByRole("tab", { name: "系统" }));
+  await userEvent.click(await screen.findByRole("tab", { name: "设置" }));
 }
 
 describe("我境界 · 成长轨迹", () => {
@@ -48,6 +48,27 @@ describe("我境界 · 成长轨迹", () => {
     await showSystem();
     expect(await screen.findByRole("switch", { name: "联网能力" })).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "主动助学" })).toBeNull();
+  });
+
+  it("设置页给出分区导航，每一节都指向真实存在的面板", async () => {
+    renderRealm();
+    // 成长页不放分区导航。
+    expect(screen.queryByRole("navigation", { name: "设置分区" })).toBeNull();
+
+    await showSystem();
+    const nav = await screen.findByRole("navigation", { name: "设置分区" });
+    const items = within(nav).getAllByRole("button");
+    expect(items).toHaveLength(10);
+
+    for (const item of items) {
+      const target = item.getAttribute("aria-controls") ?? "";
+      // 面板改了标题却忘了同步导航，会在这一句暴露。
+      expect(document.getElementById(target)).not.toBeNull();
+    }
+
+    // 点一下不报错，也不把界面切走。
+    await userEvent.click(items[5]!);
+    expect(within(nav).getAllByRole("button")[5]).toHaveTextContent("调参");
   });
 
   it("列出思考记录与演化链，采纳状态可见", async () => {
@@ -79,7 +100,8 @@ describe("我境界 · 成长轨迹", () => {
   it("调参面板按组展示范围，越界提示且整批不生效", async () => {
     renderRealm();
     await showSystem();
-    expect(await screen.findByText("调参")).toBeInTheDocument();
+    // 分区导航也有「调参」两个字，这里认准面板标题。
+    expect(await screen.findByRole("heading", { name: "调参" })).toBeInTheDocument();
     const input = await screen.findByLabelText("质询轮次上限");
     expect(input).toHaveValue("3");
 
@@ -237,7 +259,7 @@ describe("我境界 · 成长轨迹", () => {
   it("数据主权展示范围，导出只读、清除需二次确认并留痕", async () => {
     renderRealm();
     await showSystem();
-    expect(await screen.findByText("数据主权")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "数据主权" })).toBeInTheDocument();
     expect(screen.getByText("共 1482 条记录")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "导出数据文件" }));
@@ -296,32 +318,23 @@ describe("我境界 · 成长轨迹", () => {
     await waitFor(() => expect(contrast).toHaveAttribute("aria-checked", "true"));
   });
 
-  it("成本面板展示估算与日月累计，凭据只写引用，备份可创建并恢复", async () => {
+  it("用量面板展示估算与日月累计", async () => {
     renderRealm();
     await showSystem();
-    const heading = await screen.findByRole("heading", { name: "成本与配额" });
+    const heading = await screen.findByRole("heading", { name: "用量" });
     const panel = heading.closest(".panel") as HTMLElement;
 
     expect(within(panel).getByText("单场估算")).toBeInTheDocument();
     expect(within(panel).getByText("今日累计")).toBeInTheDocument();
     expect(within(panel).getByText("本月累计")).toBeInTheDocument();
     expect(within(panel).getByText("超限策略")).toBeInTheDocument();
+  });
 
-    await userEvent.type(
-      within(panel).getByLabelText("归属"),
-      "cloud",
-    );
-    await userEvent.type(
-      within(panel).getByLabelText("密钥"),
-      "sk-demo-secret",
-    );
-    await userEvent.click(
-      within(panel).getByRole("button", { name: "保存密钥" }),
-    );
-    expect(
-      await within(panel).findByText("密钥已存进系统密钥库，本应用只记住它的名字"),
-    ).toBeInTheDocument();
-    expect(within(panel).getByText("已配置")).toBeInTheDocument();
+  it("备份与恢复独立成面板，可创建并恢复", async () => {
+    renderRealm();
+    await showSystem();
+    const heading = await screen.findByRole("heading", { name: "备份与恢复" });
+    const panel = heading.closest(".panel") as HTMLElement;
 
     await userEvent.click(within(panel).getByRole("button", { name: "立即备份" }));
     expect(await within(panel).findByText(/已创建备份/)).toBeInTheDocument();
@@ -332,6 +345,118 @@ describe("我境界 · 成长轨迹", () => {
     expect(
       await within(panel).findByText("备份已校验并恢复，重启应用后生效"),
     ).toBeInTheDocument();
+  });
+
+  it("密钥写在平台面板下，只留条目引用", async () => {
+    renderRealm();
+    await showSystem();
+    const heading = await screen.findByRole("heading", { name: "联网与模型平台" });
+    const panel = heading.closest(".panel") as HTMLElement;
+
+    await userEvent.type(within(panel).getByLabelText("归属"), "cloud");
+    await userEvent.type(within(panel).getByLabelText("密钥"), "sk-demo-secret");
+    await userEvent.click(within(panel).getByRole("button", { name: "保存密钥" }));
+    expect(
+      await within(panel).findByText("密钥已存进系统密钥库，本应用只记住它的名字"),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText("已配置")).toBeInTheDocument();
+  });
+
+  it("平台表单可新增平台，并说明密钥条目名", async () => {
+    renderRealm();
+    await showSystem();
+    const heading = await screen.findByRole("heading", { name: "联网与模型平台" });
+    const panel = heading.closest(".panel") as HTMLElement;
+
+    await userEvent.type(within(panel).getByLabelText("平台代码"), "deepseek");
+    await userEvent.type(within(panel).getByLabelText("显示名"), "DeepSeek");
+    await userEvent.type(
+      within(panel).getByLabelText("服务地址"),
+      "https://api.deepseek.com/chat/completions",
+    );
+    await userEvent.type(within(panel).getByLabelText("模型名"), "deepseek-chat");
+    // 单价按元填写，内核按百万分之一元记账。
+    await userEvent.type(within(panel).getByLabelText("输入单价"), "0.002");
+    await userEvent.click(within(panel).getByRole("button", { name: "保存平台" }));
+
+    expect(
+      await within(panel).findByText(
+        "已保存 DeepSeek。密钥按代码 deepseek 写进下面的「密钥」里。",
+      ),
+    ).toBeInTheDocument();
+    // 新平台立刻进列表，不必等下次刷新。
+    expect(within(panel).getByText("DeepSeek")).toBeInTheDocument();
+  });
+
+  it("平台表单缺服务地址或模型名时不提交", async () => {
+    renderRealm();
+    await showSystem();
+    const heading = await screen.findByRole("heading", { name: "联网与模型平台" });
+    const panel = heading.closest(".panel") as HTMLElement;
+
+    await userEvent.type(within(panel).getByLabelText("平台代码"), "deepseek");
+    await userEvent.click(within(panel).getByRole("button", { name: "保存平台" }));
+
+    expect(
+      await within(panel).findByText("服务地址与模型名都填上才能保存"),
+    ).toBeInTheDocument();
+  });
+
+  it("编辑把已有平台填进表单", async () => {
+    renderRealm();
+    await showSystem();
+    const heading = await screen.findByRole("heading", { name: "联网与模型平台" });
+    const panel = heading.closest(".panel") as HTMLElement;
+
+    await userEvent.click(within(panel).getAllByRole("button", { name: "编辑" })[0]!);
+    expect(within(panel).getByLabelText("平台代码")).toHaveValue("local");
+    expect(within(panel).getByLabelText("模型名")).toHaveValue("qwen2.5:14b");
+  });
+
+  it("测试连通展示探针结论与审计", async () => {
+    renderRealm();
+    await showSystem();
+    const heading = await screen.findByRole("heading", { name: "联网与模型平台" });
+    const panel = heading.closest(".panel") as HTMLElement;
+
+    await userEvent.click(within(panel).getByRole("button", { name: "测试连通" }));
+    expect(
+      await within(panel).findByText(
+        "探针连通正常，cloud / gpt-x，耗时 842 毫秒，审计 call-demo-probe",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("体检清单按必备项给状态，并可一眼看到用量", async () => {
+    renderRealm();
+    await showSystem();
+    const heading = await screen.findByRole("heading", { name: "体检清单" });
+    const panel = heading.closest(".panel") as HTMLElement;
+
+    // 默认没开联网，这一项应标成还没就绪。
+    const networking = within(panel).getByText("联网能力").closest(".checkup") as HTMLElement;
+    expect(networking).toHaveAttribute("data-ok", "false");
+    expect(within(networking).getByText("已关闭")).toBeInTheDocument();
+
+    // 大师包在演示数据里已装好，应算就绪。
+    const masters = within(panel).getByText("大师包").closest(".checkup") as HTMLElement;
+    expect(masters).toHaveAttribute("data-ok", "true");
+
+    expect(within(panel).getByText("今日花费")).toBeInTheDocument();
+    expect(within(panel).getByText("本月花费")).toBeInTheDocument();
+  });
+
+  it("历史回顾把各来源合并成一条流水", async () => {
+    renderRealm();
+    await showSystem();
+    const heading = await screen.findByRole("heading", { name: "历史回顾" });
+    const panel = heading.closest(".panel") as HTMLElement;
+
+    const rows = panel.querySelectorAll(".call");
+    expect(rows.length).toBeGreaterThan(0);
+    // 只回顾最近的若干条，不把各来源的完整列表再铺一遍。
+    expect(rows.length).toBeLessThanOrEqual(12);
+    expect(within(panel).getAllByText("模型调用").length).toBeGreaterThan(0);
   });
 });
 

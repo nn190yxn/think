@@ -64,6 +64,12 @@ jobs:
         working-directory: src-tauri
         run: cargo test -p thought-forge-core
 
+      # 十万节点性能用例已用 #[ignore] 移出默认门禁，改在这里单独跑，
+      # 保证它仍然在真机上被覆盖。
+      - name: 内核性能用例（十万节点）
+        working-directory: src-tauri
+        run: cargo test -p thought-forge-core -- --ignored
+
       - name: 只读检查器自检用例
         working-directory: src-tauri
         run: cargo test -p thought-forge-core --examples
