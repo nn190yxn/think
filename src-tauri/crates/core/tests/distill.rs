@@ -208,7 +208,7 @@ fn happy_path_distills_and_installs() {
     let job = pipeline::confirm_skeleton(&mut conn, &client, &policy(), &job.id).expect("确认");
     assert_eq!(job.state, DistillState::Done);
     assert_eq!(job.stage, DistillStage::Done);
-    assert_eq!(job.model_calls, 9);
+    assert_eq!(job.model_calls, 10, "五路缺「术」，收口再补提一次");
 
     let detail = master_repo::detail(&conn, "demo-master").expect("大师可读");
     assert_eq!(detail.units.len(), 3, "只有通过验证且四要素齐备的单元入库");
@@ -227,6 +227,58 @@ fn happy_path_distills_and_installs() {
         .iter()
         .any(|item| item.id == "cand-case-1" && item.reason.contains("四要素")));
     assert!(draft.stress_pass_rate > 0.5);
+}
+
+/// 五路提取漏掉的题，收口阶段会对它再做一次定向提取。
+#[test]
+fn closure_extracts_a_missing_layer_after_the_first_pass() {
+    let out = tempfile::tempdir().expect("临时目录");
+    let mut conn = db();
+    let mut scripts = scripts_happy();
+    scripts.insert(
+        "distill_extract_layer_shu".to_string(),
+        r#"[{"title":"先判断再行动","summary":"动手前先判断值不值得","layer":"shu","evidence":["材料1"]}]"#
+            .to_string(),
+    );
+    let client = ScriptedClient::new(scripts);
+
+    let job = pipeline::start(&mut conn, &client, &policy(), &input(out.path())).expect("启动");
+    let job = pipeline::confirm_skeleton(&mut conn, &client, &policy(), &job.id).expect("确认");
+
+    assert_eq!(job.stage, DistillStage::Done);
+    assert_eq!(
+        client.count("distill_extract_layer_shu"),
+        1,
+        "缺「术」时应定向补提一次"
+    );
+    assert_eq!(
+        client.count("distill_extract_framework"),
+        1,
+        "已覆盖的题不重复提取"
+    );
+    assert_eq!(
+        client.count_prefix("distill_extract_layer_"),
+        1,
+        "只补缺的那一题"
+    );
+}
+
+/// 收口也补不到内容时如实留空，不报错、不编造。
+#[test]
+fn closure_keeps_the_gap_when_both_rounds_are_empty() {
+    let out = tempfile::tempdir().expect("临时目录");
+    let mut conn = db();
+    let mut scripts = scripts_happy();
+    scripts.insert("distill_extract_layer_shu".to_string(), "[]".to_string());
+    let client = ScriptedClient::new(scripts);
+
+    let job = pipeline::start(&mut conn, &client, &policy(), &input(out.path())).expect("启动");
+    let job = pipeline::confirm_skeleton(&mut conn, &client, &policy(), &job.id).expect("确认");
+
+    assert_eq!(job.state, DistillState::Done, "两次都为空也要走完");
+    assert_eq!(client.count("distill_extract_layer_shu"), 1);
+    let detail = master_repo::detail(&conn, "demo-master").expect("大师可读");
+    assert_eq!(detail.units.len(), 3, "补不到的题不编造单元");
 }
 
 #[test]
@@ -512,11 +564,11 @@ proptest! {
         prop_assert_eq!(job.state, DistillState::Failed);
         prop_assert_eq!(job.error_code.as_deref(), Some("E_MODEL_UNAVAILABLE"));
 
-        // 失败前已完成的阶段：骨架 1 次、五路提取共 5 次。
+        // 失败前已完成的阶段：骨架 1 次；提取阶段 5 路 + 六题收口补 5 题（夹具只给了 fa）。
         let skeleton_before = client.count("distill_skeleton");
         let extract_before = client.count_prefix("distill_extract");
         prop_assert_eq!(skeleton_before, 1);
-        prop_assert_eq!(extract_before, 5);
+        prop_assert_eq!(extract_before, 10);
 
         client.clear_failure();
         let resumed =

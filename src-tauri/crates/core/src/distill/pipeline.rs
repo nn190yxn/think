@@ -432,6 +432,56 @@ fn run_extract(
             "五路提取未产出任何候选".to_string(),
         ));
     }
+
+    // 六题收口：五路提取是按路径走的，未必覆盖六题。缺哪题就对那题再做一次定向提取；
+    // 这一次仍然为空就如实留空，交给「六题体检」显示缺口，不算失败。
+    let missing: Vec<Layer> = LAYER_ORDER
+        .iter()
+        .copied()
+        .filter(|layer| {
+            !extracted
+                .iter()
+                .any(|candidate| candidate.layer == layer.as_str())
+        })
+        .collect();
+    for layer in missing {
+        let code = layer.as_str();
+        let label = layer_name(code);
+        let purpose = format!("{PURPOSE_EXTRACT}_layer_{code}");
+        let system = format!(
+            "你在从材料中为思想熔炉补一个层次：{label}（{code}）。只从材料出发，不要补充材料之外的内容。\
+严格只输出 JSON 数组，不要解释或代码块标记。每个元素格式：\
+{{\"title\":\"一句话标题\",\"summary\":\"两句以内说明\",\"layer\":\"{code}\",\
+\"evidence\":[\"材料编号或原文片段\"]}}。材料里确实没有这一层次的内容时输出 []，不要为了凑数编造。"
+        );
+        let user = format!(
+            "大师：{}\n已确认骨架：{}\n主题：{}\n材料：{}\n{}前面已按五路提取，但「{label}」这一题还是空的。\
+请只补这一题的内容，没有就输出 []。",
+            job.master_name,
+            skeleton.summary,
+            skeleton.themes.join("、"),
+            context,
+            negative_text,
+        );
+        let raw = call_stage(conn, client, policy, &purpose, &system, &user)?;
+        calls += 1;
+        let items: Vec<RawCandidate> =
+            serde_json::from_str(json_array(&raw)).unwrap_or_default();
+        for (index, item) in items.into_iter().enumerate() {
+            let title = item.title.trim().to_string();
+            if title.is_empty() {
+                continue;
+            }
+            extracted.push(CandidateDraft {
+                id: format!("cand-closure-{code}-{}", index + 1),
+                track: format!("closure-{code}"),
+                title,
+                summary: item.summary.trim().to_string(),
+                layer: code.to_string(),
+                evidence: item.evidence,
+            });
+        }
+    }
     draft.extracted = extracted;
     Ok((DistillStage::Verify, DistillState::Running, draft, calls))
 }
