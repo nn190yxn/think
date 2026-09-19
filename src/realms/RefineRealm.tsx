@@ -61,6 +61,25 @@ function stageState(job: DistillJobView, key: DistillStageKey): "done" | "active
  * 炼：蒸馏熔炉。按阶段展示蒸馏进度，并让用户看清
  * 「提炼出了什么」与「淘汰了什么、为什么」。
  */
+
+interface DiscoveryScheduleView {
+  enabled: boolean;
+  intervalHours: number;
+}
+
+function readDiscoverySchedule(value: unknown): DiscoveryScheduleView {
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    const rawHours = Number(record.intervalHours ?? record.interval_hours);
+    return {
+      enabled: record.enabled === true,
+      intervalHours:
+        Number.isFinite(rawHours) && rawHours > 0 ? Math.floor(rawHours) : 24,
+    };
+  }
+  return { enabled: false, intervalHours: 24 };
+}
+
 export function RefineRealm() {
   const client = useCommands();
   const [job, setJob] = useState<DistillJobView | null>(null);
@@ -172,6 +191,19 @@ export function RefineRealm() {
       setDiscovery(await client.call("discovery_enable", { enabled }));
     });
 
+
+  const saveSchedule = (next: DiscoveryScheduleView) =>
+    run(async () => {
+      setDiscovery(
+        await client.call("discovery_schedule", {
+          schedule: {
+            enabled: next.enabled,
+            intervalHours: next.intervalHours,
+          },
+        }),
+      );
+    });
+
   const runDiscovery = () =>
     run(async () => {
       const outcome = await client.call("discovery_run", {
@@ -188,6 +220,7 @@ export function RefineRealm() {
 
   const draft = detail?.draft;
   const pending = signals.filter((signal) => signal.status === "pending");
+  const schedule = readDiscoverySchedule(discovery?.schedule);
 
   return (
     <RealmShell
@@ -448,6 +481,51 @@ export function RefineRealm() {
         >
           立即搜集一批
         </button>
+        <div className="setting-row">
+          <span className="setting-row__label">定时发现</span>
+          <button
+            className="switch"
+            type="button"
+            role="switch"
+            aria-label="定时发现"
+            aria-checked={schedule.enabled}
+            data-on={schedule.enabled}
+            disabled={busy}
+            onClick={() =>
+              void saveSchedule({
+                ...schedule,
+                enabled: !schedule.enabled,
+              })
+            }
+          >
+            {schedule.enabled ? "已开启" : "已关闭"}
+          </button>
+        </div>
+        <p className="setting-row__hint">
+          定时关闭时只接受手动搜集；开启后按间隔排队，不会绕过逐批确认。
+        </p>
+        <div className="setting-row">
+          <span className="setting-row__label">发现间隔</span>
+          <div className="adopt-row">
+            {[6, 12, 24].map((hours) => (
+              <button
+                key={hours}
+                type="button"
+                aria-pressed={schedule.intervalHours === hours}
+                disabled={busy}
+                onClick={() =>
+                  void saveSchedule({
+                    ...schedule,
+                    intervalHours: hours,
+                  })
+                }
+              >
+                {hours} 小时
+              </button>
+            ))}
+          </div>
+        </div>
+
       </section>
 
       {note ? (

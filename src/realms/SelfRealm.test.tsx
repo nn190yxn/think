@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { useState } from "react";
 import { SelfRealm } from "./SelfRealm";
 import { IpcProvider } from "../app/ipc";
+import { createCommandClient, stubTransport } from "../ipc/client";
 import { DEMO_QUESTION } from "../ipc/demoData";
 import { DEFAULT_PREFERENCES, type Preferences } from "../app/preferences";
 
@@ -457,6 +458,53 @@ describe("我境界 · 成长轨迹", () => {
     // 只回顾最近的若干条，不把各来源的完整列表再铺一遍。
     expect(rows.length).toBeLessThanOrEqual(12);
     expect(within(panel).getAllByText("模型调用").length).toBeGreaterThan(0);
+  });
+
+  it("采集记录可生成录入，再次点击提示已生成过", async () => {
+    const calls: string[] = [];
+    const client = createCommandClient({
+      invoke: async (name, request) => {
+        calls.push(name);
+        return stubTransport.invoke(name, request);
+      },
+    });
+    render(
+      <IpcProvider client={client}>
+        <RealmHarness />
+      </IpcProvider>,
+    );
+
+    await screen.findByText("采集台");
+    await userEvent.click(screen.getAllByRole("button", { name: "生成录入" })[0]!);
+    expect(await screen.findByText("已生成录入 · 去「炼」看")).toBeInTheDocument();
+    expect(calls.filter((name) => name === "intake_create")).toHaveLength(1);
+
+    await userEvent.click(screen.getAllByRole("button", { name: "生成录入" })[0]!);
+    expect(await screen.findByText("这条已经生成过录入，不再重复")).toBeInTheDocument();
+    expect(calls.filter((name) => name === "intake_create")).toHaveLength(1);
+  });
+
+  it("开启主动助学后可发起对撞并看到结果", async () => {
+    renderRealm();
+    const toggle = await screen.findByRole("switch", { name: "主动助学" });
+    if (toggle.getAttribute("aria-checked") !== "true") {
+      await userEvent.click(toggle);
+    }
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "主动助学" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      ),
+    );
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "对撞内容" }),
+      "先扩张还是先收敛",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "发起对撞" }));
+    expect(
+      await screen.findByText("两次「先扩张」的判断其实同源"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/对撞产生 2 条洞察/)).toBeInTheDocument();
   });
 });
 

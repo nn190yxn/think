@@ -11,6 +11,7 @@ import type {
   CaptureEventView,
   CaptureKindKey,
   CaptureSettingsView,
+  CollisionOutcome,
   CompanionSettings,
   ConsolidationReport,
   ConsolidationRun,
@@ -183,6 +184,20 @@ const SETTING_SECTIONS: readonly { readonly id: string; readonly label: string }
   { id: "setting-runtime", label: "运行信息" },
 ];
 
+
+function captureMaterialText(payload: unknown): string {
+  if (typeof payload === "object" && payload !== null) {
+    const record = payload as Record<string, unknown>;
+    for (const key of ["text", "title", "path", "imageRef"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) {
+        return value.trim();
+      }
+    }
+  }
+  return "";
+}
+
 export function SelfRealm({
   theme,
   onThemeChange,
@@ -226,6 +241,9 @@ export function SelfRealm({
   const [ring, setRing] = useState<RingOverview | null>(null);
   const [capture, setCapture] = useState<CaptureSettingsView | null>(null);
   const [captures, setCaptures] = useState<readonly CaptureEventView[]>([]);
+  const [intakeDone, setIntakeDone] = useState<ReadonlySet<string>>(() => new Set());
+  const [collideDraft, setCollideDraft] = useState("");
+  const [collision, setCollision] = useState<CollisionOutcome | null>(null);
   const [captureAudit, setCaptureAudit] = useState<readonly CaptureAuditView[]>([]);
   const [captureKind, setCaptureKind] = useState<CaptureKindKey | "all">("all");
   const [watchRootDraft, setWatchRootDraft] = useState("");
@@ -962,6 +980,69 @@ export function SelfRealm({
       setNote("已删除该条记录");
     } catch {
       setNote("删除采集记录失败");
+    }
+  }
+
+
+  async function generateIntake(event: CaptureEventView) {
+    if (intakeDone.has(event.id)) {
+      setNote("这条已经生成过录入，不再重复");
+      return;
+    }
+    setNote(null);
+    try {
+      const body = captureMaterialText(event.payload);
+      await client.call("intake_create", {
+        masterId: "capture-inbox",
+        masterName: "采集转入",
+        domain: "采集",
+        materials: [
+          {
+            title: captureKindLabel(event.kind),
+            kind: event.kind,
+            sourceRef: event.id,
+            text: body || "无正文",
+          },
+        ],
+      });
+      setIntakeDone((current) => {
+        const next = new Set(current);
+        next.add(event.id);
+        return next;
+      });
+      setNote("已生成录入 · 去「炼」看");
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : "生成录入失败");
+    }
+  }
+
+  async function runCollision() {
+    const content = collideDraft.trim();
+    if (!content) {
+      setNote("请先写一段要对撞的内容");
+      return;
+    }
+    setNote(null);
+    try {
+      const outcome = await client.call("companion_collide", {
+        signal: {
+          sourceKind: "manual",
+          sourceRef: "companion-panel",
+          content,
+        },
+      });
+      setCollision(outcome);
+      if (outcome.skipped) {
+        setNote(
+          outcome.skipped === "disabled"
+            ? "主动助学已关闭，本次未对撞"
+            : `本次未对撞：${outcome.skipped}`,
+        );
+        return;
+      }
+      setNote(`对撞产生 ${outcome.pushed} 条洞察，还可再推 ${outcome.remaining} 条`);
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : "对撞失败");
     }
   }
 
@@ -2055,6 +2136,13 @@ export function SelfRealm({
                     <button
                       className="capture-row__del"
                       type="button"
+                      onClick={() => void generateIntake(event)}
+                    >
+                      生成录入
+                    </button>
+                    <button
+                      className="capture-row__del"
+                      type="button"
                       onClick={() => void removeCapture(event.id)}
                     >
                       删除
@@ -2352,6 +2440,35 @@ export function SelfRealm({
                 {companion.rules.triggerOnCapture ? "已开启" : "已关闭"}
               </button>
             </div>
+            <div className="setting-row">
+              <span className="setting-row__label">对撞</span>
+              <textarea
+                className="corpus-search__input"
+                rows={3}
+                value={collideDraft}
+                onChange={(event) => setCollideDraft(event.target.value)}
+                placeholder="把一段想法丢进来，和已有判断碰一碰"
+                aria-label="对撞内容"
+              />
+              <button
+                className="consolidate__go"
+                type="button"
+                onClick={() => void runCollision()}
+              >
+                发起对撞
+              </button>
+            </div>
+            {collision ? (
+              <ul className="capture-audit" aria-label="对撞结果">
+                {collision.generated.length === 0 ? (
+                  <li>没有新的洞察</li>
+                ) : (
+                  collision.generated.map((insight) => (
+                    <li key={insight.id}>{insight.title}</li>
+                  ))
+                )}
+              </ul>
+            ) : null}
           </>
         ) : (
           <p className="setting-row__hint">读取中</p>

@@ -85,4 +85,26 @@ describe("炼境界 · 蒸馏熔炉", () => {
       expect(screen.getByText("搜集到 3 条，新增 3 条待确认")).toBeInTheDocument(),
     );
   });
+
+  it("可配置定时发现与间隔", async () => {
+    renderRealm();
+    const toggle = await screen.findByRole("switch", { name: "定时发现" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await userEvent.click(toggle);
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "定时发现" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      ),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "6 小时" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "6 小时" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+  });
 });
