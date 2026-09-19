@@ -2148,6 +2148,18 @@
   font-size: var(--fs-meta);
 }
 
+.vault-issues {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  color: var(--ember);
+  font-size: var(--fs-meta);
+}
+
+.vault-issues li {
+  margin: 0 0 var(--sp-1);
+}
+
 .vault-error {
   color: var(--ember);
   font-size: var(--fs-meta);

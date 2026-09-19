@@ -102,6 +102,16 @@ export interface LayerProfile {
   readonly unitTitles: readonly string[];
 }
 
+export interface MasterValidatePreview {
+  readonly id: string;
+  readonly name: string;
+  readonly domain: string;
+  readonly version: number;
+  readonly layers: readonly LayerKey[];
+  readonly unitCount: number;
+  readonly corpusCount: number;
+}
+
 export interface InstallOutcome {
   readonly masterId: string;
   readonly version: number;
@@ -1338,7 +1348,10 @@ export interface CommandMap {
     response: null;
   };
   master_install: { request: { packPath: string }; response: InstallOutcome };
-  master_validate: { request: { packPath: string }; response: unknown };
+  master_validate: {
+    request: { packPath: string };
+    response: MasterValidatePreview;
+  };
   coverage_matrix: { request: Record<string, never>; response: CoverageMatrix };
   master_domains: { request: Record<string, never>; response: readonly string[] };
   corpus_list: {

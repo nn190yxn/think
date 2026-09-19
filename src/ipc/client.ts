@@ -456,8 +456,28 @@ export const stubTransport: CommandTransport = {
             diff: { added: [], updated: [], carried: 0, sourceRefs: [] },
           },
         };
-      case "master_validate":
-        return { ok: true, data: { valid: true } };
+      case "master_validate": {
+        const packPath = String(payload.packPath ?? "");
+        if (packPath.includes("broken") || packPath.includes("invalid")) {
+          return {
+            ok: false,
+            code: "E_PACK_INVALID",
+            message: "大师包校验未通过（2 项）：缺少 master.json；缺少来源标注",
+          };
+        }
+        return {
+          ok: true,
+          data: {
+            id: "installed-demo",
+            name: "演示新大师",
+            domain: "试验",
+            version: 1,
+            layers: ["dao"],
+            unitCount: 1,
+            corpusCount: 1,
+          },
+        };
+      }
       case "coverage_matrix":
         return { ok: true, data: DEMO_COVERAGE };
       case "master_domains":

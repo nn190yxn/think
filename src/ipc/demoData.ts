@@ -284,6 +284,65 @@ function demoLayerProfile(units: DemoMaster["units"]): readonly LayerProfile[] {
 
 const REGISTERED_AT = "2026-09-14T00:00:00Z";
 
+const INSTALLED_DEMO_UNITS: DemoMaster["units"] = [
+  {
+    title: "先问这一题有没有自己的说法",
+    layer: "dao",
+    triggerCondition: "装入一位新大师之后",
+    steps: ["看六题体检", "空题如实标空"],
+    mechanism: "缺题不是失败，是还没积累",
+    boundary: "不把空题补成空话",
+    excerpt: "先把空缺看见。",
+    location: "notes.md",
+  },
+];
+
+export const DEMO_INSTALLED_DETAIL: MasterDetail = {
+  id: "installed-demo",
+  name: "演示新大师",
+  domain: "试验",
+  layers: ["dao"],
+  status: "ready",
+  currentVersion: 1,
+  summary: "从文件装入后用来核对六题体检。",
+  style: "先把空缺摊开",
+  blindSpots: "空题被当成失败",
+  units: [
+    {
+      id: "installed-demo-u1",
+      title: INSTALLED_DEMO_UNITS[0]!.title,
+      layer: "dao",
+      triggerCondition: INSTALLED_DEMO_UNITS[0]!.triggerCondition,
+      steps: INSTALLED_DEMO_UNITS[0]!.steps,
+      mechanism: INSTALLED_DEMO_UNITS[0]!.mechanism,
+      boundary: INSTALLED_DEMO_UNITS[0]!.boundary,
+      citations: [
+        {
+          corpusItemId: "installed-demo-corpus",
+          excerpt: INSTALLED_DEMO_UNITS[0]!.excerpt,
+          location: INSTALLED_DEMO_UNITS[0]!.location,
+          available: true,
+        },
+      ],
+    },
+  ],
+  versions: [
+    {
+      version: 1,
+      unitCount: 1,
+      note: "文件安装",
+      createdAt: REGISTERED_AT,
+      diff: {
+        added: ["先问这一题有没有自己的说法"],
+        updated: [],
+        carried: 0,
+        sourceRefs: ["notes.md"],
+      },
+    },
+  ],
+  layerProfile: demoLayerProfile(INSTALLED_DEMO_UNITS),
+};
+
 export const DEMO_SUMMARIES: readonly MasterSummary[] = DEMO_MASTERS.map((master) => ({
   id: master.id,
   name: master.name,
@@ -298,6 +357,9 @@ export const DEMO_SUMMARIES: readonly MasterSummary[] = DEMO_MASTERS.map((master
 }));
 
 export function demoDetail(masterId: string): MasterDetail | null {
+  if (masterId === "installed-demo") {
+    return DEMO_INSTALLED_DETAIL;
+  }
   const master = DEMO_MASTERS.find((candidate) => candidate.id === masterId);
   if (!master) {
     return null;

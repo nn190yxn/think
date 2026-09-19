@@ -6,7 +6,7 @@ import type { MasterSummary } from "../ipc/commands";
 /** 第一阶段名册规划容量；超出只提示，不拦截安装。 */
 export const ROSTER_CAPACITY = 20;
 
-const EMPTY_HINT = "还没招募 · 去「藏」装种子包，或在「炼」蒸馏一位";
+const EMPTY_HINT = "还没招募 · 从文件安装大师包，或在「炼」蒸馏一位";
 
 function isCjk(ch: string): boolean {
   const code = ch.codePointAt(0) ?? 0;

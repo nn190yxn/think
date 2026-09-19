@@ -22,6 +22,20 @@ import type {
   SkillView,
 } from "../ipc/commands";
 
+
+export function packIssuesFromError(error: CommandInvocationError): readonly string[] {
+  if (error.code !== "E_PACK_INVALID") {
+    return [error.message];
+  }
+  const marker = "）：";
+  const index = error.message.indexOf(marker);
+  const body = index >= 0 ? error.message.slice(index + marker.length) : error.message;
+  return body
+    .split("；")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 type VaultView = "masters" | "archive" | "assets" | "terrain";
 
 /**
@@ -36,8 +50,46 @@ export function VaultRealm() {
   const [selected, setSelected] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [packPath, setPackPath] = useState("");
+  const [packIssues, setPackIssues] = useState<readonly string[]>([]);
+  const [checkup, setCheckup] = useState<MasterDetail | null>(null);
 
   const coverage = matrix.data;
+
+  async function installFromFile(event: FormEvent) {
+    event.preventDefault();
+    const path = packPath.trim();
+    if (!path) {
+      setStatus("请先填写大师包路径");
+      return;
+    }
+    setBusy(true);
+    setPackIssues([]);
+    setCheckup(null);
+    try {
+      await client.call("master_validate", { packPath: path });
+    } catch (cause) {
+      const error = cause as CommandInvocationError;
+      setPackIssues(packIssuesFromError(error));
+      setStatus("校验未通过，未写入");
+      setBusy(false);
+      return;
+    }
+    try {
+      const outcome = await client.call("master_install", { packPath: path });
+      const detail = await client.call("master_detail", { masterId: outcome.masterId });
+      setCheckup(detail);
+      setSelected(outcome.masterId);
+      setStatus(outcome.created ? "已从文件安装大师包" : "已更新大师包");
+    } catch (cause) {
+      const error = cause as CommandInvocationError;
+      setStatus(`安装失败：${error.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+
 
   async function run(label: string, action: () => Promise<unknown>) {
     setBusy(true);
@@ -105,7 +157,8 @@ export function VaultRealm() {
           <section className="vault-block">
             <h2 className="section-head">大师档案</h2>
             <p className="vault-note">先选一位大师，再看他的完整档案。</p>
-            <ul className="masters">
+    
+        <ul className="masters">
               {(masters.data ?? []).map((master) => (
                 <li key={master.id} className="masters__row">
                   <button
@@ -197,6 +250,59 @@ export function VaultRealm() {
             安装种子大师包
           </button>
         </div>
+        <form className="corpus-search" onSubmit={installFromFile}>
+          <input
+            className="corpus-search__input"
+            value={packPath}
+            onChange={(event) => setPackPath(event.target.value)}
+            placeholder="大师包目录，例如 D:/masters/new"
+            aria-label="大师包路径"
+          />
+          <button type="submit" className="vault-action" disabled={busy}>
+            从文件安装大师包
+          </button>
+        </form>
+        {packIssues.length > 0 ? (
+          <ul className="vault-issues" aria-label="未过项">
+            {packIssues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        ) : null}
+        {checkup ? (
+          <section className="vault-block" aria-label="六题体检">
+            <h2 className="section-head">
+              六题体检 · {checkup.name}
+              <span className="mono vault-count">
+                {checkup.layerProfile.filter((entry) => entry.unitCount > 0).length} /{" "}
+                {LAYER_KEYS.length}
+              </span>
+            </h2>
+            <ul className="profile">
+              {checkup.layerProfile.map((entry) => (
+                <li
+                  key={entry.layer}
+                  className="profile__row"
+                  data-layer={entry.layer}
+                  data-empty={entry.unitCount === 0}
+                >
+                  <div className="profile__line">
+                    <span className="profile__name">{entry.name}</span>
+                    <span className="profile__question">{entry.question}</span>
+                    <span className="profile__count mono">
+                      {entry.unitCount === 0 ? "空" : `${entry.unitCount} 条`}
+                    </span>
+                  </div>
+                  <p className="profile__units">
+                    {entry.unitCount === 0
+                      ? "这一题还没有积累"
+                      : entry.unitTitles.join("、")}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <ul className="masters">
           {(masters.data ?? []).map((master) => (
             <li key={master.id} className="masters__row" data-status={master.status}>
@@ -227,7 +333,7 @@ export function VaultRealm() {
           ))}
           {masters.data && masters.data.length === 0 ? (
             <li className="vault-empty">
-              还没有大师包。安装种子包，或从蒸馏熔炉炼出第一位。
+              还没有大师包。从文件安装大师包，或在「炼」蒸馏一位。
             </li>
           ) : null}
         </ul>

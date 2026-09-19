@@ -1,8 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { VaultRealm } from "./VaultRealm";
+import { packIssuesFromError, VaultRealm } from "./VaultRealm";
 import { IpcProvider } from "../app/ipc";
+import { createCommandClient, stubTransport } from "../ipc/client";
+import { CommandInvocationError } from "../ipc/protocol";
 
 function renderRealm() {
   return render(
@@ -146,5 +148,58 @@ describe("藏境界 · 资产图谱", () => {
     await userEvent.click(screen.getByRole("checkbox", { name: "只看待修复" }));
     expect(screen.getByRole("button", { name: /周报生成/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /写作/ })).not.toBeInTheDocument();
+  });
+});
+
+
+describe("藏境界 · 从文件安装", () => {
+  it("把 E_PACK_INVALID 的未过项全部拆开", () => {
+    expect(
+      packIssuesFromError(
+        new CommandInvocationError(
+          "E_PACK_INVALID",
+          "大师包校验未通过（2 项）：缺少 master.json；缺少来源标注",
+        ),
+      ),
+    ).toEqual(["缺少 master.json", "缺少来源标注"]);
+  });
+
+  it("校验失败列出全部未过项，并且不调用安装", async () => {
+    const calls: string[] = [];
+    const client = createCommandClient({
+      invoke: async (name, request) => {
+        calls.push(name);
+        return stubTransport.invoke(name, request);
+      },
+    });
+    render(
+      <IpcProvider client={client}>
+        <VaultRealm />
+      </IpcProvider>,
+    );
+
+    const input = await screen.findByRole("textbox", { name: "大师包路径" });
+    await userEvent.type(input, "D:/broken-pack");
+    await userEvent.click(screen.getByRole("button", { name: "从文件安装大师包" }));
+
+    expect(await screen.findByText("缺少 master.json")).toBeInTheDocument();
+    expect(screen.getByText("缺少来源标注")).toBeInTheDocument();
+    expect(screen.getByText("校验未通过，未写入")).toBeInTheDocument();
+    expect(calls).toContain("master_validate");
+    expect(calls).not.toContain("master_install");
+  });
+
+  it("安装成功后展示六题体检，空缺题保留", async () => {
+    renderRealm();
+    const input = await screen.findByRole("textbox", { name: "大师包路径" });
+    await userEvent.type(input, "D:/good-pack");
+    await userEvent.click(screen.getByRole("button", { name: "从文件安装大师包" }));
+
+    expect(
+      await screen.findByRole("heading", { name: /六题体检 · 演示新大师/ }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("已从文件安装大师包")).toBeInTheDocument();
+    expect(screen.getAllByText("这一题还没有积累")).toHaveLength(5);
+    expect(screen.getByText("先问这一题有没有自己的说法")).toBeInTheDocument();
   });
 });
