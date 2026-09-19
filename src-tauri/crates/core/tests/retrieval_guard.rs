@@ -1,6 +1,6 @@
 //! 检索安全：发送前脱敏、关键词模式、两阶段预演与外部内容净化。
 
-use std::cell::RefCell;
+use std::sync::Mutex;
 
 use thought_forge_core::capture::redact::RedactionRules;
 use thought_forge_core::capture::repo as capture_repo;
@@ -15,14 +15,14 @@ use thought_forge_core::db::settings;
 use thought_forge_core::{CoreError, CoreResult};
 
 struct ScriptedSearch {
-    queries: RefCell<Vec<String>>,
+    queries: Mutex<Vec<String>>,
     hits: Vec<SearchHit>,
 }
 
 impl ScriptedSearch {
     fn with_hits(hits: Vec<SearchHit>) -> Self {
         Self {
-            queries: RefCell::new(Vec::new()),
+            queries: Mutex::new(Vec::new()),
             hits,
         }
     }
@@ -32,13 +32,13 @@ impl ScriptedSearch {
     }
 
     fn sent(&self) -> Vec<String> {
-        self.queries.borrow().clone()
+        self.queries.lock().expect("问句可读取").clone()
     }
 }
 
 impl SearchProvider for ScriptedSearch {
     fn search(&self, query: &str, limit: usize) -> CoreResult<Vec<SearchHit>> {
-        self.queries.borrow_mut().push(query.to_string());
+        self.queries.lock().expect("问句可写入").push(query.to_string());
         Ok(self.hits.iter().take(limit).cloned().collect())
     }
 }

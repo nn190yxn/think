@@ -932,9 +932,13 @@ pub fn connector_upsert(
             input.config = serde_json::json!({ "tools": tools });
             connector_repo::upsert(&conn, &input)
         } else if input.kind.trim() == thought_forge_core::connector::KIND_SEARCH {
+            let timeout_secs = crate::connector::timeout_from_db(&conn)?;
             ensure_provider_ready(&input.endpoint, |endpoint| {
-                let provider =
-                    crate::connector::search_provider(endpoint, input.id.as_deref())?;
+                let provider = crate::connector::search_provider(
+                    endpoint,
+                    input.id.as_deref(),
+                    timeout_secs,
+                )?;
                 provider.search("__probe__", 1).map(|_| ())
             })?;
             connector_repo::upsert(&conn, &input)
@@ -1001,11 +1005,15 @@ pub fn connector_test(
             });
         }
 
+        let timeout_secs = crate::connector::timeout_from_db(&conn)?;
         let started = std::time::Instant::now();
         let outcome = match view.kind.as_str() {
             thought_forge_core::connector::KIND_SEARCH => {
-                let provider =
-                    crate::connector::search_provider(&view.endpoint, Some(&view.id))?;
+                let provider = crate::connector::search_provider(
+                    &view.endpoint,
+                    Some(&view.id),
+                    timeout_secs,
+                )?;
                 let sent = prepared
                     .as_ref()
                     .map(|item| item.sent.clone())
@@ -1015,7 +1023,7 @@ pub fn connector_test(
                     .map(|hits| format!("检索可用，返回 {} 条结果", hits.len()))
             }
             thought_forge_core::connector::KIND_PAGE => {
-                let provider = crate::connector::page_reader()?;
+                let provider = crate::connector::page_reader(timeout_secs)?;
                 provider.read(&view.endpoint).map(|page| {
                     format!("网页可读，正文 {} 字", page.text.chars().count())
                 })
@@ -1143,9 +1151,11 @@ pub fn council_search(
                 hits: Vec::new(),
             });
         }
+        let timeout_secs = crate::connector::timeout_from_db(&conn)?;
         let provider = crate::connector::search_provider(
             &connector.endpoint,
             Some(&connector.id),
+            timeout_secs,
         )?;
         let max = limit.unwrap_or_else(|| {
             council_tuning::int_of(&conn, "connector.max_results").unwrap_or(6)

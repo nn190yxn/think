@@ -106,17 +106,17 @@ pub struct ToolSpec {
 }
 
 /// 搜索能力。外壳实现真实检索，测试用脚本化实现。
-pub trait SearchProvider {
+pub trait SearchProvider: Send + Sync {
     fn search(&self, query: &str, limit: usize) -> CoreResult<Vec<SearchHit>>;
 }
 
 /// 网页阅读能力。
-pub trait PageReader {
+pub trait PageReader: Send + Sync {
     fn read(&self, url: &str) -> CoreResult<PageContent>;
 }
 
 /// MCP 工具能力。只接受能返回工具能力声明的服务器。
-pub trait ToolProvider {
+pub trait ToolProvider: Send + Sync {
     fn list_tools(&self) -> CoreResult<Vec<ToolSpec>>;
     fn call_tool(&self, name: &str, arguments_json: &str) -> CoreResult<String>;
 }

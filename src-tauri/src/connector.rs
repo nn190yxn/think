@@ -25,8 +25,8 @@ use thought_forge_core::{CoreError, CoreResult};
 
 use crate::credential::ShellCredentialStore;
 
-/// 单次连接器请求的超时。
-const TIMEOUT_SECS: u64 = 30;
+/// 调参缺省时的单次连接器请求超时。
+const DEFAULT_TIMEOUT_SECS: u64 = 15;
 /// 响应体读取上限，避免超大页面占满内存。
 const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 /// MCP 客户端声明使用的协议版本。
@@ -44,9 +44,9 @@ fn malformed(message: impl Into<String>) -> CoreError {
     CoreError::MalformedResponse(message.into())
 }
 
-fn http_client() -> CoreResult<reqwest::blocking::Client> {
+fn http_client(timeout_secs: u64) -> CoreResult<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(TIMEOUT_SECS))
+        .timeout(Duration::from_secs(timeout_secs.clamp(3, 60)))
         .build()
         .map_err(|error| call_failed(format!("初始化连接器传输失败：{error}")))
 }
@@ -355,14 +355,21 @@ pub struct HttpSearchProvider {
     client: reqwest::blocking::Client,
     endpoint: String,
     api_key: String,
+    timeout_secs: u64,
 }
 
 impl HttpSearchProvider {
-    pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>) -> CoreResult<Self> {
+    pub fn with_timeout(
+        endpoint: impl Into<String>,
+        api_key: impl Into<String>,
+        timeout_secs: u64,
+    ) -> CoreResult<Self> {
+        let timeout_secs = timeout_secs.clamp(3, 60);
         Ok(Self {
-            client: http_client()?,
+            client: http_client(timeout_secs)?,
             endpoint: endpoint.into(),
             api_key: api_key.into(),
+            timeout_secs,
         })
     }
 }
@@ -376,7 +383,13 @@ impl SearchProvider for HttpSearchProvider {
         }
         let response = request
             .send()
-            .map_err(|error| call_failed(format!("检索请求失败：{error}")))?;
+            .map_err(|error| {
+                if error.is_timeout() {
+                    call_failed(format!("连接器超时（{} 秒）", self.timeout_secs))
+                } else {
+                    call_failed(format!("检索请求失败：{error}"))
+                }
+            })?;
         let status = response.status();
         let body = read_body(response)?;
         if !status.is_success() {
@@ -392,12 +405,15 @@ impl SearchProvider for HttpSearchProvider {
 /// 通用网页阅读实现：抓取地址并按 HTML 正文提取。
 pub struct HttpPageReader {
     client: reqwest::blocking::Client,
+    timeout_secs: u64,
 }
 
 impl HttpPageReader {
-    pub fn new() -> CoreResult<Self> {
+    pub fn with_timeout(timeout_secs: u64) -> CoreResult<Self> {
+        let timeout_secs = timeout_secs.clamp(3, 60);
         Ok(Self {
-            client: http_client()?,
+            client: http_client(timeout_secs)?,
+            timeout_secs,
         })
     }
 }
@@ -409,7 +425,13 @@ impl PageReader for HttpPageReader {
             .get(url)
             .header("Accept", "text/html,application/xhtml+xml")
             .send()
-            .map_err(|error| call_failed(format!("网页抓取失败：{error}")))?;
+            .map_err(|error| {
+                if error.is_timeout() {
+                    call_failed(format!("连接器超时（{} 秒）", self.timeout_secs))
+                } else {
+                    call_failed(format!("网页抓取失败：{error}"))
+                }
+            })?;
         let status = response.status();
         let body = read_body(response)?;
         if !status.is_success() {
@@ -427,16 +449,19 @@ pub struct HttpToolProvider {
     client: reqwest::blocking::Client,
     endpoint: String,
     api_key: String,
+    timeout_secs: u64,
     session: Mutex<Option<String>>,
     initialized: Mutex<bool>,
 }
 
 impl HttpToolProvider {
     pub fn new(endpoint: impl Into<String>, api_key: impl Into<String>) -> CoreResult<Self> {
+        let timeout_secs = DEFAULT_TIMEOUT_SECS;
         Ok(Self {
-            client: http_client()?,
+            client: http_client(timeout_secs)?,
             endpoint: endpoint.into(),
             api_key: api_key.into(),
+            timeout_secs,
             session: Mutex::new(None),
             initialized: Mutex::new(false),
         })
@@ -462,7 +487,13 @@ impl HttpToolProvider {
         let response = request
             .body(body)
             .send()
-            .map_err(|error| call_failed(format!("MCP 请求失败：{error}")))?;
+            .map_err(|error| {
+                if error.is_timeout() {
+                    call_failed(format!("连接器超时（{} 秒）", self.timeout_secs))
+                } else {
+                    call_failed(format!("MCP 请求失败：{error}"))
+                }
+            })?;
         let status = response.status();
         if let Some(session) = response
             .headers()
@@ -575,15 +606,18 @@ impl ShellConnector {
                 page: None,
             });
         }
+        let timeout_secs = thought_forge_core::council::tuning::int_of(conn, "connector.timeout_secs")?
+            .clamp(3, 60) as u64;
         let search = match repo::enabled_of_kind(conn, KIND_SEARCH)? {
-            Some(view) => Some(HttpSearchProvider::new(
+            Some(view) => Some(HttpSearchProvider::with_timeout(
                 &view.endpoint,
                 resolve_key(Some(&view.id)),
+                timeout_secs,
             )?),
             None => None,
         };
         let page = match repo::enabled_of_kind(conn, KIND_PAGE)? {
-            Some(_) => Some(HttpPageReader::new()?),
+            Some(_) => Some(HttpPageReader::with_timeout(timeout_secs)?),
             None => None,
         };
         Ok(Self { search, page })
@@ -608,17 +642,24 @@ impl ShellConnector {
     }
 }
 
+/// 读取调参面板上的连接器超时，并限制在 3–60 秒。
+pub fn timeout_from_db(conn: &rusqlite::Connection) -> CoreResult<u64> {
+    Ok(thought_forge_core::council::tuning::int_of(conn, "connector.timeout_secs")?
+        .clamp(3, 60) as u64)
+}
+
 /// 按配置装配一个检索连接器，供配置预检与连通测试使用。
 pub fn search_provider(
     endpoint: &str,
     connector_id: Option<&str>,
+    timeout_secs: u64,
 ) -> CoreResult<HttpSearchProvider> {
-    HttpSearchProvider::new(endpoint, resolve_key(connector_id))
+    HttpSearchProvider::with_timeout(endpoint, resolve_key(connector_id), timeout_secs)
 }
 
 /// 按配置装配一个网页阅读器。
-pub fn page_reader() -> CoreResult<HttpPageReader> {
-    HttpPageReader::new()
+pub fn page_reader(timeout_secs: u64) -> CoreResult<HttpPageReader> {
+    HttpPageReader::with_timeout(timeout_secs)
 }
 
 /// 按配置装配一个 MCP 工具客户端。
@@ -795,7 +836,7 @@ mod tests {
             &[("Content-Type", "application/json")],
             body,
         )]);
-        let provider = HttpSearchProvider::new(&server.base, "").expect("装配成功");
+        let provider = HttpSearchProvider::with_timeout(&server.base, "", DEFAULT_TIMEOUT_SECS).expect("装配成功");
         let hits = provider.search("hello world", 3).expect("检索成功");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].url, "https://a.example/1");
@@ -815,7 +856,7 @@ mod tests {
             &[("Content-Type", "text/plain")],
             "检索服务未就绪",
         )]);
-        let provider = HttpSearchProvider::new(&server.base, "secret").expect("装配成功");
+        let provider = HttpSearchProvider::with_timeout(&server.base, "secret", DEFAULT_TIMEOUT_SECS).expect("装配成功");
         let error = provider.search("q", 1).unwrap_err();
         assert_eq!(error.code(), "E_NETWORK_OFF");
         assert!(error.to_string().contains("503"));
@@ -834,7 +875,7 @@ mod tests {
             &[("Content-Type", "text/html")],
             html,
         )]);
-        let reader = HttpPageReader::new().expect("装配成功");
+        let reader = HttpPageReader::with_timeout(DEFAULT_TIMEOUT_SECS).expect("装配成功");
         let page = reader.read(&server.base).expect("抓取成功");
         assert_eq!(page.title, "页面标题");
         assert!(page.text.contains("正文一"));

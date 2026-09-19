@@ -1,6 +1,7 @@
 //! 骑士团会诊：选角、换批、隔离作答与调用审计。
 
 use std::cell::RefCell;
+use std::sync::Mutex;
 use std::path::PathBuf;
 
 use thought_forge_core::council::{
@@ -1284,27 +1285,27 @@ fn failed_seat_can_be_retried_without_rerunning_the_session() {
 
 /// 脚本化检索：记录调用次数与问句，返回固定条数的外部资料。
 struct ScriptedSearch {
-    calls: RefCell<usize>,
-    queries: RefCell<Vec<String>>,
+    calls: Mutex<usize>,
+    queries: Mutex<Vec<String>>,
 }
 
 impl ScriptedSearch {
     fn new() -> Self {
         Self {
-            calls: RefCell::new(0),
-            queries: RefCell::new(Vec::new()),
+            calls: Mutex::new(0),
+            queries: Mutex::new(Vec::new()),
         }
     }
 
     fn call_count(&self) -> usize {
-        *self.calls.borrow()
+        *self.calls.lock().expect("记录可读取")
     }
 }
 
 impl SearchProvider for ScriptedSearch {
     fn search(&self, query: &str, limit: usize) -> CoreResult<Vec<SearchHit>> {
-        *self.calls.borrow_mut() += 1;
-        self.queries.borrow_mut().push(query.to_string());
+        *self.calls.lock().expect("记录可写入") += 1;
+        self.queries.lock().expect("问句可写入").push(query.to_string());
         Ok((0..limit.min(3))
             .map(|index| SearchHit {
                 title: format!("外部资料{index}"),
@@ -1394,7 +1395,8 @@ fn seat_search_only_reaches_its_own_prompt() {
     let session = run_session_with_retrieval(&conn, &client, &retrieval);
 
     assert_eq!(search.call_count(), 6, "每个席位各补一次检索");
-    for query in search.queries.borrow().iter() {
+    let sent = search.queries.lock().expect("问句可读取");
+    for query in sent.iter() {
         assert!(!query.is_empty(), "席位检索有可发送的内容");
         assert!(
             !query.contains(question()),

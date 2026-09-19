@@ -1,6 +1,7 @@
 //! 连接器：检索隔离、共享背景一致、快照冻结、上限约束、正文快照与失败降级。
 
-use std::cell::RefCell;
+use std::sync::Mutex;
+use std::time::Duration;
 
 use thought_forge_core::connector::{
     self as connector, repo as connector_repo, service as connector_service,
@@ -11,8 +12,8 @@ use thought_forge_core::db::{self, migrations};
 use thought_forge_core::{CoreError, CoreResult};
 
 struct ScriptedSearch {
-    calls: RefCell<usize>,
-    queries: RefCell<Vec<String>>,
+    calls: Mutex<usize>,
+    queries: Mutex<Vec<String>>,
     hits: Vec<SearchHit>,
     fail: bool,
 }
@@ -28,8 +29,8 @@ impl ScriptedSearch {
             })
             .collect();
         Self {
-            calls: RefCell::new(0),
-            queries: RefCell::new(Vec::new()),
+            calls: Mutex::new(0),
+            queries: Mutex::new(Vec::new()),
             hits,
             fail: false,
         }
@@ -37,22 +38,22 @@ impl ScriptedSearch {
 
     fn failing() -> Self {
         Self {
-            calls: RefCell::new(0),
-            queries: RefCell::new(Vec::new()),
+            calls: Mutex::new(0),
+            queries: Mutex::new(Vec::new()),
             hits: Vec::new(),
             fail: true,
         }
     }
 
     fn call_count(&self) -> usize {
-        *self.calls.borrow()
+        *self.calls.lock().expect("记录可读取")
     }
 }
 
 impl SearchProvider for ScriptedSearch {
     fn search(&self, query: &str, limit: usize) -> CoreResult<Vec<SearchHit>> {
-        *self.calls.borrow_mut() += 1;
-        self.queries.borrow_mut().push(query.to_string());
+        *self.calls.lock().expect("记录可写入") += 1;
+        self.queries.lock().expect("问句可写入").push(query.to_string());
         if self.fail {
             return Err(CoreError::NetworkOff("脚本化检索失败".to_string()));
         }
@@ -61,12 +62,12 @@ impl SearchProvider for ScriptedSearch {
 }
 
 struct ScriptedPage {
-    calls: RefCell<usize>,
+    calls: Mutex<usize>,
 }
 
 impl PageReader for ScriptedPage {
     fn read(&self, _url: &str) -> CoreResult<PageContent> {
-        *self.calls.borrow_mut() += 1;
+        *self.calls.lock().expect("记录可写入") += 1;
         Ok(PageContent {
             title: "正文标题".to_string(),
             text: "正".repeat(connector::MAX_BODY_CHARS + 100),
@@ -202,7 +203,7 @@ fn body_snapshot_follows_the_toggle() {
     let session_id = session(&conn);
     let search = ScriptedSearch::new(1);
     let page = ScriptedPage {
-        calls: RefCell::new(0),
+        calls: Mutex::new(0),
     };
     let retrieval = Retrieval {
         search: Some(&search),
@@ -213,7 +214,7 @@ fn body_snapshot_follows_the_toggle() {
         connector_service::collect_background(&conn, &retrieval, &session_id, 0, "问题")
             .expect("可检索");
     assert!(!without[0].has_body, "默认不保存正文");
-    assert_eq!(*page.calls.borrow(), 0);
+    assert_eq!(*page.calls.lock().expect("记录可读取"), 0);
 
     set_tuning(&conn, "connector.snapshot_body", "true");
     let session_id = session(&conn);
@@ -308,4 +309,49 @@ fn connector_status_follows_configuration() {
         .expect("可查询")
         .expect("应能查到");
     assert_eq!(found.id, saved.id);
+}
+
+struct SlowSearch;
+
+impl SearchProvider for SlowSearch {
+    fn search(&self, _query: &str, _limit: usize) -> CoreResult<Vec<SearchHit>> {
+        std::thread::sleep(Duration::from_millis(3200));
+        Ok(vec![SearchHit {
+            title: "来晚了".to_string(),
+            url: "https://example.com/late".to_string(),
+            snippet: "超时之后才回来的结果".to_string(),
+            published_at: None,
+        }])
+    }
+}
+
+#[test]
+fn timeout_is_recorded_as_readable_failure() {
+    let conn = memory_db();
+    let session_id = session(&conn);
+    set_tuning(&conn, "connector.timeout_secs", "3");
+    let search = SlowSearch;
+    let retrieval = Retrieval {
+        search: Some(&search),
+        page: None,
+    };
+
+    let sources =
+        connector_service::collect_background(&conn, &retrieval, &session_id, 0, "超时该怎么记")
+            .expect("超时后会诊仍可继续");
+    assert!(sources.is_empty(), "超时不得把迟到的结果写入快照");
+
+    let calls = connector_repo::recent_calls(&conn, 10).expect("可读审计");
+    assert_eq!(calls[0].status, "failed");
+    assert_eq!(calls[0].error_code.as_deref(), Some("E_NETWORK_OFF"));
+    assert!(
+        calls[0].latency_ms >= 2500,
+        "应等到超时再失败，实际 {} ms",
+        calls[0].latency_ms
+    );
+    assert!(
+        calls[0].latency_ms < 6000,
+        "超时后应停止等待，实际 {} ms",
+        calls[0].latency_ms
+    );
 }

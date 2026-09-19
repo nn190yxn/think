@@ -3,13 +3,13 @@
 //! 快照在会诊启动时冻结：某一范围（共享背景或某席位）落库后，本次会诊的
 //! 后续轮次直接读取该批快照，不再重复检索；历史会诊回看只读快照。
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
 
 use crate::council::tuning;
 use crate::council::SourceView;
-use crate::error::CoreResult;
+use crate::error::{CoreError, CoreResult};
 
 use super::guard;
 use super::repo::{self, ConnectorCallRecord, NewSource};
@@ -32,6 +32,32 @@ impl<'a> Retrieval<'a> {
             page: None,
         }
     }
+}
+
+
+/// 连接器单次调用超时，范围与调参面板一致（3–60 秒）。
+fn timeout_secs(conn: &Connection) -> CoreResult<u64> {
+    Ok(tuning::int_of(conn, "connector.timeout_secs")?.clamp(3, 60) as u64)
+}
+
+fn timeout_error(secs: u64) -> CoreError {
+    CoreError::NetworkOff(format!("连接器超时（{secs} 秒）"))
+}
+
+fn run_with_timeout<T: Send>(
+    secs: u64,
+    work: impl FnOnce() -> CoreResult<T> + Send,
+) -> CoreResult<T> {
+    std::thread::scope(|scope| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        scope.spawn(move || {
+            let _ = tx.send(work());
+        });
+        match rx.recv_timeout(Duration::from_secs(secs)) {
+            Ok(result) => result,
+            Err(_) => Err(timeout_error(secs)),
+        }
+    })
 }
 
 /// 共享背景检索：结果以 `master_id` 为空落库，注入全部席位。
@@ -57,11 +83,12 @@ pub fn collect_background(
     }
 
     let max_results = tuning::int_of(conn, "connector.max_results")?.clamp(1, 20) as usize;
+    let timeout_secs = timeout_secs(conn)?;
     let mode = tuning::value_of(conn, "connector.query_mode")?;
     let prepared = guard::prepare_query(conn, question, &mode)?;
     let connector_id = repo::enabled_of_kind(conn, KIND_SEARCH)?.map(|view| view.id);
     let started = Instant::now();
-    let outcome = search.search(&prepared.sent, max_results);
+    let outcome = run_with_timeout(timeout_secs, || search.search(&prepared.sent, max_results));
     let latency = started.elapsed().as_millis() as i64;
 
     match outcome {
@@ -134,6 +161,7 @@ pub fn collect_for_seat(
     };
 
     let max_results = tuning::int_of(conn, "connector.max_results")?.clamp(1, 20) as usize;
+    let timeout_secs = timeout_secs(conn)?;
     let mode = tuning::value_of(conn, "connector.query_mode")?;
     let connector_id = repo::enabled_of_kind(conn, KIND_SEARCH)?.map(|view| view.id);
 
@@ -143,7 +171,7 @@ pub fn collect_for_seat(
         }
         let prepared = guard::prepare_query(conn, query, &mode)?;
         let started = Instant::now();
-        let outcome = search.search(&prepared.sent, max_results);
+        let outcome = run_with_timeout(timeout_secs, || search.search(&prepared.sent, max_results));
         let latency = started.elapsed().as_millis() as i64;
         match outcome {
             Ok(hits) => {
@@ -219,12 +247,13 @@ fn persist_hits(
     hits: &[SearchHit],
 ) -> CoreResult<()> {
     let snapshot_body = tuning::bool_of(conn, "connector.snapshot_body")?;
+    let timeout_secs = timeout_secs(conn)?;
     let fetched_at = repo::now(conn)?;
     for hit in hits {
         let body = if snapshot_body {
             retrieval
                 .page
-                .and_then(|page| page.read(&hit.url).ok())
+                .and_then(|page| run_with_timeout(timeout_secs, || page.read(&hit.url)).ok())
                 .map(|content| normalize_body(&content.text))
                 .filter(|text| !text.is_empty())
         } else {
