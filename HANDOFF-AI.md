@@ -97,6 +97,15 @@ pnpm gate:shell    :: cd src-tauri && cargo test -p thought-forge-desktop --lib 
 - 环境类（找不到链接器、找不到 Windows SDK）→ 回 3.1 补装。
 - 代码类（编译错误指向 `council/` 下文件）→ 见第四节的"未验证改动"，那是上一轮盲写的三处，按语义修正，不要删功能。
 
+### 3.6 更省事的另一条路：先走云端验证
+
+只想先确认"上一轮那三处内核改动能不能编译、用例过不过"，**不必先在本机装工具链**：
+在 GitHub 仓库页 → Actions → 选 `verify-thought-forge-windows.yml` → Run workflow。
+它在 `windows-latest` 上编译内核、跑 `cargo test -p thought-forge-core` 与只读检查器用例，几分钟出结果。
+
+两条路的区别：云端只能告诉你改对没改对，**改不动代码**；要反复瞎改改，还是得有本地工具链。
+建议顺序：先跑云端确认基线，再装本地工具链准备干后面的活。
+
 ---
 
 ## 四、第二步：验证上一轮留下的三处内核改动（**未编译，重点看这里**）
