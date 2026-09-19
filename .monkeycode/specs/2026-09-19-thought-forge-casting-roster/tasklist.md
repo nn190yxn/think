@@ -24,7 +24,7 @@
 - [x] 20.12 「藏」补大师包安装入口：先用 `master_validate` 验包并列出未过项，通过后 `master_install`，失败不写入
 - [x] 20.13 安装后展示该大师的六题体检（缺题如实标空），并修正空位提示文案为「从文件安装大师包，或在「炼」蒸馏一位」
 - [x] 20.14 六题积累补列表等效视图，键盘可达、焦点可见
-- [ ] 20.15 运行全量门禁（内核 + 两个 crate clippy + 前端三项）
+- [x] 20.15 运行全量门禁（内核 + 两个 crate clippy + 前端三项）
 - [ ] 维护（贯穿）：`src/components/SeatPicker.tsx` 的 `deepestLayer` / `layerFit` / `predictedSeats` 是内核选角规则的**界面复刻**（中文分词也对齐了 `scoring::tokens`）。内核规则一改（`council/select.rs` 的落座层与排序），必须同步这里，否则界面预判与真实选角会对不上。
 
 门禁 P20：`cargo test -p thought-forge-core` 全部二进制通过；两个 crate clippy 归零；`pnpm typecheck`、`pnpm test`、`pnpm build` 通过；「锁定的人坐到他积累最深的题」「同席位竞争按积累深度排序」「覆盖下限仍成立」三条断言通过；点将面板七条前端用例通过；安装入口用例通过（校验失败时列出未过项且不写入）；会诊进行中点将不可点的用例通过。
