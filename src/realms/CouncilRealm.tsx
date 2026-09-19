@@ -5,6 +5,8 @@ import { LayerGlyph } from "../components/LayerGlyph";
 import { DivergenceCurve } from "../components/DivergenceCurve";
 import { SeatSpeech } from "../components/SeatSpeech";
 import { FollowUpForm } from "../components/FollowUpForm";
+import { SeatPicker, predictedSeats } from "../components/SeatPicker";
+
 import { CouncilConclusion } from "../components/CouncilConclusion";
 import { RealmShell } from "./RealmShell";
 import { useCommand, useCommands } from "../app/ipc";
@@ -19,6 +21,7 @@ import type {
   CouncilStrategy,
   EchoHit,
   FollowUpAnchor,
+  MasterSummary,
   SearchOutcome,
 } from "../ipc/commands";
 
@@ -64,11 +67,13 @@ export function CouncilRealm({
 } = {}) {
   const client = useCommands();
   const candidates = useCommand("council_candidates", {});
+  const masters = useCommand("master_list", {});
   const tuning = useCommand("tuning_get", {});
 
   const [question, setQuestion] = useState(seed ?? "");
   const [strategy, setStrategy] = useState<CouncilStrategy>("steady");
   const [pinned, setPinned] = useState<readonly string[]>([]);
+  const [pickerLayer, setPickerLayer] = useState<LayerKey | null>(null);
   const [session, setSession] = useState<CouncilSessionView | null>(null);
   const [seats, setSeats] = useState<readonly CouncilSeat[]>([]);
   const [gaps, setGaps] = useState<readonly LayerKey[]>([]);
@@ -162,6 +167,18 @@ export function CouncilRealm({
   }, [seats]);
 
   const busy = phase === "selecting" || phase === "running";
+  const roster = masters.data ?? [];
+  const pinByLayer = useMemo(() => {
+    const assigned = predictedSeats(roster, pinned);
+    const map = new Map<LayerKey, MasterSummary>();
+    for (const [id, layer] of assigned) {
+      const master = roster.find((item) => item.id === id);
+      if (master) {
+        map.set(layer, master);
+      }
+    }
+    return map;
+  }, [roster, pinned]);
 
   // 曲线上的参考线取自与本次会诊同一套调参，避免界面上出现两套阈值。
   const threshold = useMemo(() => {
@@ -433,6 +450,30 @@ export function CouncilRealm({
     );
   }
 
+  function openPicker(layer: LayerKey) {
+    if (busy) {
+      return;
+    }
+    setPickerLayer(layer);
+  }
+
+  function confirmCast(masterId: string) {
+    if (pickerLayer === null) {
+      return;
+    }
+    const seat = pickerLayer;
+    setPinned((current) => {
+      const assigned = predictedSeats(roster, current);
+      const occupantId = [...assigned.entries()].find(([, layer]) => layer === seat)?.[0];
+      return [...current.filter((id) => id !== occupantId && id !== masterId), masterId];
+    });
+    setPickerLayer(null);
+  }
+
+  function cancelCast(masterId: string) {
+    setPinned((current) => current.filter((id) => id !== masterId));
+  }
+
   /** 接上一次中断的会话继续跑：只补未完成的轮次，已完成的发言与裁决不重来。 */
   async function resume(target: CouncilSessionView) {
     setError(null);
@@ -652,7 +693,41 @@ export function CouncilRealm({
                     <span className="seat__gap">这一题还要再谈</span>
                   ) : null}
                   {occupants.length === 0 ? (
-                    <span className="seat__name">待选角</span>
+                    pinByLayer.get(slot.layer) ? (
+                      <>
+                        <span className="seat__name">
+                          已点 · {pinByLayer.get(slot.layer)!.name}
+                        </span>
+                        <button
+                          className="seat__swap"
+                          type="button"
+                          disabled={busy}
+                          title={busy ? "本轮已经开始，换人下次生效" : "换人"}
+                          onClick={() => openPicker(slot.layer)}
+                        >
+                          换人
+                        </button>
+                        <button
+                          className="seat__unpin"
+                          type="button"
+                          disabled={busy}
+                          title={busy ? "本轮已经开始，换人下次生效" : "取消点将"}
+                          onClick={() => cancelCast(pinByLayer.get(slot.layer)!.id)}
+                        >
+                          取消
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="seat__cast"
+                        type="button"
+                        disabled={busy}
+                        title={busy ? "本轮已经开始，换人下次生效" : "从名册点将"}
+                        onClick={() => openPicker(slot.layer)}
+                      >
+                        待选角
+                      </button>
+                    )
                   ) : null}
                   {occupants.length > 1 ? (
                     <span className="seat__same-question">
@@ -682,6 +757,15 @@ export function CouncilRealm({
                             ? "已锁定"
                             : "锁定"}
                         </button>
+                        <button
+                          className="seat__swap"
+                          type="button"
+                          disabled={busy}
+                          title={busy ? "本轮已经开始，换人下次生效" : "换人"}
+                          onClick={() => openPicker(slot.layer)}
+                        >
+                          换人
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -696,6 +780,21 @@ export function CouncilRealm({
             </p>
           </div>
         </div>
+
+        {busy ? (
+          <p className="council__note">本轮已经开始，换人下次生效</p>
+        ) : null}
+
+        {pickerLayer ? (
+          <SeatPicker
+            layer={pickerLayer}
+            question={question}
+            roster={roster}
+            pinned={pinned}
+            onConfirm={confirmCast}
+            onClose={() => setPickerLayer(null)}
+          />
+        ) : null}
 
         {gaps.length > 0 ? (
           <section className="council__gaps" aria-label="还要再谈的题">

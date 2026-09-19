@@ -330,4 +330,46 @@ describe("圆桌会诊", () => {
       await screen.findByText("这一场按你的要求没有带你自己的席位。"),
     ).toBeInTheDocument();
   });
+
+  it("待选角可打开点将面板，确认后座位留痕并可取消", async () => {
+    renderRealm();
+    const empty = await screen.findAllByRole("button", { name: "待选角" });
+    await userEvent.click(empty[0]!);
+    const dialog = await screen.findByRole("dialog", { name: "选角" });
+    expect(within(dialog).getByText("道 · 什么值得做")).toBeInTheDocument();
+    await userEvent.click(await within(dialog).findByRole("button", { name: /稻盛和夫/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认入席" }));
+    expect(screen.queryByRole("dialog", { name: "选角" })).toBeNull();
+    expect(await screen.findByText("已点 · 稻盛和夫")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByText("已点 · 稻盛和夫")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "待选角" }).length).toBeGreaterThan(0);
+  });
+
+  it("会诊进行中点将不可点，并说明下次生效", async () => {
+    const client = createCommandClient({
+      invoke: async (name, request) => {
+        if (name === "council_run") {
+          await new Promise(() => undefined);
+        }
+        return stubTransport.invoke(name, request);
+      },
+    });
+    render(
+      <IpcProvider client={client}>
+        <CouncilRealm />
+      </IpcProvider>,
+    );
+    await userEvent.type(screen.getByLabelText("议题"), "要不要换一条赛道");
+    await userEvent.click(screen.getByRole("button", { name: "发起会诊" }));
+    await waitFor(() =>
+      expect(document.querySelectorAll('.seat[data-filled="true"]')).toHaveLength(6),
+    );
+    expect(screen.getByText("本轮已经开始，换人下次生效")).toBeInTheDocument();
+    const swaps = screen.getAllByRole("button", { name: "换人" });
+    expect(swaps.length).toBeGreaterThan(0);
+    for (const button of swaps) {
+      expect(button).toBeDisabled();
+    }
+  });
 });
