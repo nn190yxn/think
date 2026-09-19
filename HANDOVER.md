@@ -128,7 +128,7 @@ pnpm tauri signer generate -w $env:USERPROFILE\.tauri\thought-forge.key
 4. **Defender 排除**：把仓库目录与 `src-tauri/target` 加进排除路径，实时扫描会让 Rust 构建慢好几倍。
 5. **磁盘与内存**：`target/` 膨胀很快，debug 加 release 加多目标很容易吃掉二三十 GB。建议 8 核、32 GB 内存、SSD 留 60 GB。内存只有 8 GB 时要设 `CARGO_BUILD_JOBS=2`。
 6. **内核测试含性能用例**：`cargo test -p thought-forge-core` 会连十万节点的 `tests/network_perf.rs` 一起跑，慢是正常的。只想跑单项用 `--test <模块>`。
-7. **一个已知 flake**：桌面壳的 `capture::tests::file_watch_reports_created_file` 用墙钟断言，偶发失败，云端较慢的机器更容易触发，重跑即可。
+7. **文件监听用例已改为稳定判据**：桌面壳的 `capture::tests::file_watch_reports_created_file` 原先断言「排空后队列为空」，但 Windows 上写一个文件会同时产生 create 与 modify 两个事件，稍晚到达的 modify 会让它随机失败（本机实测约一半概率）。现改为等 500ms 后排空，只断言同一路径的同一事件类型不再出现第二次；修前 4 跑 2 败，修后连跑 8 次全过。
 8. **前端演示数据是模块级可变状态**：`src/ipc/client.ts` 为各功能保留了 `demo*` 状态，同一测试文件内的用例共享它。跨用例断言要按卡片标题定位，不要依赖索引与总数。
 9. **跨测试文件重名的模块**：`capture`、`kb`、`self_distill`、`data`、`asset` 下都有 `pipeline` 或 `repo` 或 `service`，命令层与测试引用时用 `capture_pipeline`、`kb_service`、`self_service` 这类别名。`self` 是 Rust 关键字，自我蒸馏模块注册为 `self_distill`。
 10. **Tauri 打包目标取值**：`bundle.targets` 只接受 `deb`、`rpm`、`appimage`、`msi`、`nsis`、`app`、`dmg`。Windows 的 WiX 产物对应 `msi`，写成 `wix` 会让构建脚本直接失败。

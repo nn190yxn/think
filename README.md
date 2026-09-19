@@ -17,7 +17,7 @@
 - [九、规格文档](#九规格文档)
 - [十、当前进度](#十当前进度)
 
-接手继续开发前，先读 `HANDOVER.md`。
+接手继续开发前，先读 `HANDOVER.md`；准备做第一次人工实测前，先读 `人工实测路线图.md`。
 
 ## 一、这是什么
 
@@ -212,7 +212,17 @@ pnpm tauri:build:windows
 
 ### 质量门禁
 
-每次改动后按顺序跑完这四组，全绿才算完成一个阶段：
+按改动面选一档跑，全绿才算完成一个阶段。不确定改到了哪一层就跑 `gate:all`：
+
+```bash
+pnpm gate:front   # 只改了界面
+pnpm gate:core    # 只改了内核
+pnpm gate:shell   # 只改了桌面外壳（需 Windows 工具链）
+pnpm gate:all     # 前端 + 内核 + 桌面外壳，全量
+pnpm gate:perf    # 单独跑十万节点性能用例，不在上面任何一档里
+```
+
+`gate:all` 依次展开为：
 
 ```bash
 # 前端
@@ -231,10 +241,12 @@ cargo test -p thought-forge-desktop --lib
 cargo clippy -p thought-forge-desktop --all-targets -- -D warnings
 ```
 
-两点约定：
+三点约定：
 
-- 内核的 `tests/network_perf.rs` 会建十万节点的库，`cargo test -p thought-forge-core` 会把它一起跑。只想跑单项用 `--test <模块名>`。
+- 内核的 `tests/network_perf.rs` 会建十万节点的库，已加 `#[ignore]` 移出默认门禁，日常 `cargo test` 不再跑它；要跑用 `pnpm gate:perf`，云端验收工作流与发布工作流各有一处独立步骤覆盖它。只想跑单项用 `--test <模块名>`。
 - 项目不使用 rustfmt 门禁。core crate 未采用 rustfmt 约定，`cargo fmt -- --check` 会报大量既有漂移，不要为了让它通过做全量空格级改动。
+
+以上三档在 Windows 真机上的验证状态（2026-09-19，Monkeycode）：`pnpm gate:all` 全绿——前端 129 用例 + 类型检查 + 打包，内核 262 用例 + 检查器 7 用例，桌面壳 32 用例，两处 clippy 均零警告；`gate:perf` 的十万节点性能用例也通过。同日设置页改造后（面板归位、「备份与恢复」从用量里拆出来、加了一排分区跳转）只动前端，复跑 `pnpm gate:front` 全绿：前端 139 用例 + 类型检查 + 打包；内核与桌面壳本轮未跑。
 
 发布前还有一道静态检查，占位配置下会以退出码 1 失败，属预期：
 
@@ -273,9 +285,12 @@ cargo run -p thought-forge-core --example forge_verify -- $env:APPDATA\com.thoug
 | `.monkeycode/specs/thought-forge-workbench/` | 基线规格：需求、技术设计、界面设计、P1 至 P9 任务清单 |
 | `.monkeycode/specs/2026-09-15-thought-forge-deepening/` | 深化规格：需求、技术设计、P10 至 P16 任务清单、Windows 真机验证手册 |
 | `.monkeycode/specs/2026-09-17-thought-forge-six-questions/` | 六题会诊规格：需求、技术设计、P17 至 P19 任务清单 |
+| `.monkeycode/specs/2026-09-19-thought-forge-casting-roster/` | 点将与名册规格：需求、技术设计、P20 至 P23 任务清单、接通审计 |
 
 ## 十、当前进度
 
 P1 至 P19 的开发任务已全部完成并通过各自门禁：基线 P1 至 P9、深化 P10 至 P15 与 P16.1、P16.2，以及六题会诊 P17 至 P19。
+
+新规格 `2026-09-19-thought-forge-casting-roster/`（点将与大师名册）已完成设计、尚未实施：P20 把「待选角」做成可点的点将入口并让六题积累参与选角，P21 蒸馏六题收口，P22 种子六位补料。设计结论是六题改轴（P17 至 P19）已经落地，缺口在种子包的料（六位每人只有两条技能单元）、点将入口与名册名额。开工前的接通审计（同目录 `wiring-audit.md`）又查出三处：大师包没有安装入口、六题档案没进选角、采集只进不出；对应的处置已排入 P20 与 P23。
 
 剩下的是 P16.3 至 P16.10 这八项只能在 Windows 真机上做的验收，以及两项贯穿性维护任务。移交清单、待补配置与执行顺序见 `HANDOVER.md`。
