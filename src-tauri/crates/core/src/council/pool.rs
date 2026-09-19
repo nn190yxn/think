@@ -17,6 +17,8 @@ pub struct MasterText {
     pub name: String,
     pub domain: String,
     pub layers: Vec<Layer>,
+    /// 每题（层次）的技能单元数，供选角按题深浅排序。
+    pub layer_depth: BTreeMap<Layer, usize>,
     pub tokens: BTreeSet<String>,
     /// 按题（层次）分组的单元文本指纹，供同题对立度使用。
     pub layer_tokens: BTreeMap<Layer, BTreeSet<String>>,
@@ -59,6 +61,7 @@ pub fn load_master_texts(conn: &Connection) -> CoreResult<Vec<MasterText>> {
             name,
             domain,
             layers,
+            layer_depth: BTreeMap::new(),
             tokens: scoring::tokens(&text),
             layer_tokens: BTreeMap::new(),
         });
@@ -80,14 +83,24 @@ pub fn load_master_texts(conn: &Connection) -> CoreResult<Vec<MasterText>> {
         ))
     })?;
     let mut by_master: BTreeMap<String, BTreeMap<Layer, String>> = BTreeMap::new();
+    let mut count_by_master: BTreeMap<String, BTreeMap<Layer, usize>> = BTreeMap::new();
     for row in unit_rows {
         let (master_id, layer_name, text) = row?;
         let Some(layer) = Layer::parse(&layer_name) else {
             continue;
         };
-        let entry = by_master.entry(master_id).or_default().entry(layer).or_default();
+        let entry = by_master
+            .entry(master_id.clone())
+            .or_default()
+            .entry(layer)
+            .or_default();
         entry.push(' ');
         entry.push_str(&text);
+        *count_by_master
+            .entry(master_id)
+            .or_default()
+            .entry(layer)
+            .or_insert(0) += 1;
     }
     for master in &mut masters {
         if let Some(units) = by_master.remove(&master.id) {
@@ -95,6 +108,7 @@ pub fn load_master_texts(conn: &Connection) -> CoreResult<Vec<MasterText>> {
                 .into_iter()
                 .map(|(layer, text)| (layer, scoring::tokens(&text)))
                 .collect();
+            master.layer_depth = count_by_master.remove(&master.id).unwrap_or_default();
         }
     }
     Ok(masters)
@@ -167,6 +181,7 @@ pub fn build(conn: &Connection, topic: &TopicInput<'_>) -> CoreResult<CandidateP
             name: master.name.clone(),
             domain: master.domain.clone(),
             layers: master.layers.clone(),
+            layer_depth: master.layer_depth.clone(),
             relevance,
             opposition,
             domain_distance,

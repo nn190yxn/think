@@ -95,6 +95,30 @@ fn rank_score(ctx: &RankContext<'_>, candidate: &Candidate, layer: Option<Layer>
     }
 }
 
+/// 落座层：优先他有料、且本阵容尚未覆盖的题，取积累最深的一题；有料的题都已被
+/// 覆盖时退回他最深的一题；完全没有单元时退回声明层。并列时按六题顺序取靠前的。
+fn deepest_layer(candidate: &Candidate, covered: &BTreeSet<Layer>) -> Layer {
+    for pass in 0..2 {
+        let mut best: Option<(Layer, usize)> = None;
+        for layer in LAYER_ORDER {
+            if pass == 0 && covered.contains(&layer) {
+                continue;
+            }
+            let count = candidate.layer_depth.get(&layer).copied().unwrap_or(0);
+            if count == 0 {
+                continue;
+            }
+            if best.map_or(true, |(_, best_count)| count > best_count) {
+                best = Some((layer, count));
+            }
+        }
+        if let Some((layer, _)) = best {
+            return layer;
+        }
+    }
+    super::primary_layer(&candidate.layers)
+}
+
 /// 按策略从候选池中选出入席阵容。
 pub fn select_panel(
     conn: &Connection,
@@ -137,7 +161,7 @@ pub fn select_panel(
         if let Some(candidate) = by_id.get(id.as_str()) {
             if selected_ids.insert(candidate.master_id.clone()) {
                 selected.push(candidate.master_id.clone());
-                let layer = super::primary_layer(&candidate.layers);
+                let layer = deepest_layer(candidate, &covered);
                 covered.insert(layer);
                 seats.push(make_seat(
                     &RankContext {
@@ -263,7 +287,7 @@ pub fn select_panel(
             Some(candidate) => {
                 selected_ids.insert(candidate.master_id.clone());
                 selected.push(candidate.master_id.clone());
-                let layer = super::primary_layer(&candidate.layers);
+                let layer = deepest_layer(candidate, &covered);
                 covered.insert(layer);
                 seats.push(make_seat(
                     &RankContext {
@@ -330,8 +354,24 @@ fn compare(
             0.0
         }
     };
-    let left_score = rank_score(ctx, left, layer) - penalty(left);
-    let right_score = rank_score(ctx, right, layer) - penalty(right);
+    let left_penalty = penalty(left);
+    let right_penalty = penalty(right);
+    // 换批排除仍是最强优先级，避免为了「料多」把换人意图打穿。
+    if left_penalty != right_penalty {
+        return left_penalty
+            .partial_cmp(&right_penalty)
+            .unwrap_or(std::cmp::Ordering::Equal);
+    }
+    // 补某一题时，先比候选在该题上的积累深浅，再比策略分。
+    if let Some(target) = layer {
+        let left_depth = left.layer_depth.get(&target).copied().unwrap_or(0);
+        let right_depth = right.layer_depth.get(&target).copied().unwrap_or(0);
+        if left_depth != right_depth {
+            return right_depth.cmp(&left_depth);
+        }
+    }
+    let left_score = rank_score(ctx, left, layer);
+    let right_score = rank_score(ctx, right, layer);
     right_score
         .partial_cmp(&left_score)
         .unwrap_or(std::cmp::Ordering::Equal)

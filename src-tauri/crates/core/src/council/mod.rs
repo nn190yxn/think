@@ -14,6 +14,8 @@ pub mod speech;
 pub mod tuning;
 pub mod followup;
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::master::{Layer, LAYER_ORDER};
@@ -77,6 +79,8 @@ pub struct Candidate {
     pub name: String,
     pub domain: String,
     pub layers: Vec<Layer>,
+    /// 每题（层次）的积累深度，即该题的技能单元数；没有单元的题不出现。
+    pub layer_depth: BTreeMap<Layer, usize>,
     /// 与话题标签、大师文本的匹配度。
     pub relevance: f64,
     /// 与其他候选的最大对立度，供碰撞策略排序。
