@@ -58,7 +58,7 @@
 - [x] 23.2 陪练「对撞」入口：能发起一次对撞并看到结果（命令 `companion_collide` 已存在，只缺界面）
 - [x] 23.3 「定时发现」可配置：是否定时与间隔（命令 `discovery_schedule` 已存在，只缺界面）
 - [x] 23.4 接通「连接器超时」：对外请求读 `connector.timeout_secs`，超时作为可读失败原因
-- [ ] 23.5 补测试并运行全量门禁；更新 `README.md` 与 `wiring-audit.md` 的处置状态
+- [x] 23.5 补测试并运行全量门禁；更新 `README.md` 与 `wiring-audit.md` 的处置状态
 
 ## 待定项（需拍板后再排）
 
