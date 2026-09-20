@@ -330,6 +330,98 @@ pub struct SeedFailure {
     pub message: String,
 }
 
+/// 扫描种子目录并逐个安装。不依赖 Tauri 类型，启动期与命令共用。
+pub fn install_all(
+    root: &std::path::Path,
+    conn: &mut rusqlite::Connection,
+) -> thought_forge_core::CoreResult<SeedInstallReport> {
+    let entries = std::fs::read_dir(root).map_err(|error| {
+        thought_forge_core::CoreError::InvalidInput(format!("读取种子目录失败：{error}"))
+    })?;
+
+    let mut packs: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.join("master.json").is_file())
+        .collect();
+    packs.sort();
+
+    let mut installed: Vec<InstallOutcome> = Vec::new();
+    let mut failures: Vec<SeedFailure> = Vec::new();
+    for path in packs {
+        match master_repo::install(conn, &path) {
+            Ok(outcome) => installed.push(outcome),
+            Err(error) => failures.push(SeedFailure {
+                pack: path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                message: error.to_string(),
+            }),
+        }
+    }
+
+    Ok(SeedInstallReport {
+        root: root.to_string_lossy().to_string(),
+        installed,
+        failures,
+    })
+}
+
+/// 一次性安装标记的设置键。
+pub const SEED_INSTALLED_KEY: &str = "seed_packs_installed";
+
+/// 首启自动装种子包：装成功后落一次性标记，之后不再自动装，
+/// 免得用户删掉某位大师后每次启动又被塞回来。
+pub fn seed_install_once(app: &tauri::AppHandle) -> thought_forge_core::CoreResult<()> {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let mut conn = lock(&state);
+    if db::settings::get(&conn, SEED_INSTALLED_KEY)?.as_deref() == Some("1") {
+        return Ok(());
+    }
+    // 名册非空说明不是首启：只落标记，不重装，免得现有安装被塞出版本堆积。
+    if !master_repo::list(&conn, None, None)?.is_empty() {
+        db::settings::set(&conn, SEED_INSTALLED_KEY, "1")?;
+        return Ok(());
+    }
+    let Some(root) = seed_root(app) else {
+        return Ok(());
+    };
+    let report = install_all(&root, &mut conn)?;
+    // 有失败就不落标记，下次启动再试一次。
+    if report.failures.is_empty() {
+        db::settings::set(&conn, SEED_INSTALLED_KEY, "1")?;
+        eprintln!("已自动安装 {} 个种子大师包", report.installed.len());
+    } else {
+        eprintln!("种子大师包部分安装失败：{} 个", report.failures.len());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod seed_install_tests {
+    use super::*;
+
+    /// 种子目录里的六个包都能装上，且没有失败项。
+    #[test]
+    fn install_all_installs_the_six_seed_packs() {
+        let dir = std::env::temp_dir().join(format!("forge-seed-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        let (mut conn, _version) =
+            thought_forge_core::db::initialize(dir.join("forge.db")).expect("初始化库");
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("仓库根")
+            .join("seed-packs");
+        let report = install_all(&root, &mut conn).expect("安装种子包");
+        assert_eq!(report.installed.len(), 6);
+        assert!(report.failures.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SeedInstallReport {

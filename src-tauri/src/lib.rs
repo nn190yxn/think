@@ -21,6 +21,10 @@ pub fn run() {
             match state::initialize_state(&handle) {
                 Ok(app_state) => {
                     app.manage(app_state);
+                    // 首启自动装种子大师包；失败只记一笔，不阻断启动。
+                    if let Err(error) = commands::seed_install_once(&handle) {
+                        eprintln!("种子大师包自动安装跳过：{error}");
+                    }
                     Ok(())
                 }
                 Err(error) => Err(error.to_string().into()),
