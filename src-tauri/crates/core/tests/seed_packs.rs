@@ -31,7 +31,7 @@ fn pack_dirs() -> Vec<PathBuf> {
 #[test]
 fn every_seed_pack_installs_and_covers_all_six_layers() {
     let dirs = pack_dirs();
-    assert_eq!(dirs.len(), 15, "名册现有十五位大师，每位一个种子包");
+    assert_eq!(dirs.len(), 20, "名册现有二十位大师，每位一个种子包");
 
     let mut conn = memory_db();
 
@@ -45,7 +45,7 @@ fn every_seed_pack_installs_and_covers_all_six_layers() {
     }
 
     let matrix = repo::coverage_matrix(&conn).unwrap();
-    assert_eq!(matrix.master_count, 15);
+    assert_eq!(matrix.master_count, 20);
     assert!(matrix.suggestions.is_empty(), "六层应无空缺");
 
     for entry in &matrix.layers {
@@ -74,7 +74,7 @@ fn every_seed_pack_covers_all_six_layers_in_its_own_units() {
         domains: &[],
     };
     let masters = pool_repo::build(&conn, &topic).unwrap();
-    assert_eq!(masters.candidates.len(), 15, "每个种子包各一位大师");
+    assert_eq!(masters.candidates.len(), 20, "每个种子包各一位大师");
 
     for master in &masters.candidates {
         for layer in LAYER_ORDER {
@@ -97,7 +97,7 @@ fn every_seed_pack_corpus_is_searchable_by_its_title() {
     }
 
     let items = corpus::repo::list(&conn, None).unwrap();
-    assert_eq!(items.len(), 15, "每个种子包各一份语料");
+    assert_eq!(items.len(), 20, "每个种子包各一份语料");
 
     for item in &items {
         let hits = corpus::repo::search(&conn, &item.title, None).unwrap();
@@ -127,6 +127,6 @@ fn seed_corpus_is_searchable_after_install() {
     );
 
     let items = corpus::repo::list(&conn, None).unwrap();
-    assert_eq!(items.len(), 15);
+    assert_eq!(items.len(), 20);
     assert!(items.iter().all(|item| item.available));
 }
