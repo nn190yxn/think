@@ -6,3 +6,4 @@ coverage
 .env.*
 src-tauri/target
 src-tauri/gen
+.ohmyagent/

@@ -103,7 +103,12 @@ export function deepestLayer(
       return best.layer;
     }
   }
-  return master.layers[0] ?? "dao";
+  return primaryLayer(master);
+}
+
+/** 完全没有单元时的回退：与内核 primary_layer 对齐，按六题顺序取声明层。 */
+function primaryLayer(master: MasterSummary): LayerKey {
+  return LAYER_KEYS.find((layer) => master.layers.includes(layer)) ?? master.layers[0] ?? "fa";
 }
 
 export function predictedSeats(

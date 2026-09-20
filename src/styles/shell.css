@@ -2833,6 +2833,21 @@
   color: var(--ember-bright);
 }
 
+.checkup__go {
+  padding: 0 var(--sp-1);
+  border: var(--line-w) solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.checkup__go:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
 .checkup__hint {
   grid-column: 2;
   color: var(--text-3);

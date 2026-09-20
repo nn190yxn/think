@@ -285,7 +285,7 @@ cargo run -p thought-forge-core --example forge_verify -- $env:APPDATA\com.thoug
 | `.monkeycode/specs/thought-forge-workbench/` | 基线规格：需求、技术设计、界面设计、P1 至 P9 任务清单 |
 | `.monkeycode/specs/2026-09-15-thought-forge-deepening/` | 深化规格：需求、技术设计、P10 至 P16 任务清单、Windows 真机验证手册 |
 | `.monkeycode/specs/2026-09-17-thought-forge-six-questions/` | 六题会诊规格：需求、技术设计、P17 至 P19 任务清单 |
-| `.monkeycode/specs/2026-09-19-thought-forge-casting-roster/` | 点将与名册规格：需求、技术设计、P20 至 P23 任务清单、接通审计 |
+| `.monkeycode/specs/2026-09-19-thought-forge-casting-roster/` | 点将与名册规格：需求、技术设计、P20 至 P28 任务清单、接通审计、交付说明（`DELIVERY.md`）与名册规划 |
 
 ## 十、当前进度
 
@@ -293,4 +293,6 @@ P1 至 P19 的开发任务已全部完成并通过各自门禁：基线 P1 至 P
 
 新规格 `2026-09-19-thought-forge-casting-roster/`（点将与大师名册）已实施大半：P20 全部完成（点将入口、六题积累参与选角、大师包安装入口、六题体检），P23 的采集出口、陪练对撞、定时发现、连接器超时已接通。P20 与 P23 的全量门禁经复核者在本机实测通过：前端 155 用例、内核全部用例（`council` 44 条）、桌面壳 32 用例、两个 crate clippy 零警告。设计结论是六题改轴（P17 至 P19）已经落地，缺口在种子包的料（六位每人只有两条技能单元）、点将入口与名册名额。开工前的接通审计（同目录 `wiring-audit.md`）又查出三处：大师包没有安装入口、六题档案没进选角、采集只进不出；对应的处置已排入 P20 与 P23。
 
-剩下的是 P21 蒸馏六题收口与 P23.5 收尾（内核侧），P22 种子六位补料（内容任务，由 Alex 本人做），以及 P16.3 至 P16.10 这八项只能在 Windows 真机上做的验收。移交清单、待补配置与执行顺序见 `HANDOVER.md`。
+剩下的是 P21 蒸馏六题收口与 P23.5 收尾（内核侧），以及 P16.3 至 P16.10 这八项只能在 Windows 真机上做的验收。移交清单、待补配置与执行顺序见 `HANDOVER.md`。
+
+2026-09-21 续：P21、P22、P23、P24、P25、P28 均已推到位（名册从 6 位扩到 20 位，每位九条单元、六题无缺口）。剩下两件：一是 P26 真机验收（需真机、模型密钥，我无法代做），二是 P25.4 诊断包与 P25.6 安装包（前者低优先未做，后者经 Alex 拍板暂缓）。交付内容、上手步骤与未验证项集中在同目录 `DELIVERY.md`。

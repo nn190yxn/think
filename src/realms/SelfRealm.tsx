@@ -128,6 +128,8 @@ type CheckupItem = {
   readonly hint: string;
   readonly ok: boolean;
   readonly required: boolean;
+  /** 「去配置」的落点：同页给分区 id，大师包给 "vault"（在另一个境界）。 */
+  readonly target: string;
 };
 
 /** 数必备项里已就绪或未就绪的条数。 */
@@ -205,6 +207,7 @@ export function SelfRealm({
   onPreferencesChange,
   view,
   onViewChange,
+  onGoVault,
 }: {
   readonly theme: ThemeName;
   readonly onThemeChange: (next: ThemeName) => void;
@@ -213,6 +216,8 @@ export function SelfRealm({
   /** 外壳指定看哪一处（顶部「设置」按钮直进设置）；不传就自己管。 */
   readonly view?: SelfView;
   readonly onViewChange?: (next: SelfView) => void;
+  /** 体检项的「去配置」可能要换境界（大师包在「藏」），由外壳给出口。 */
+  readonly onGoVault?: () => void;
 }) {
   const db = useCommand("db_status", {});
   const app = useCommand("app_info", {});
@@ -376,6 +381,15 @@ export function SelfRealm({
     return tuningDraft[item.key] ?? item.value;
   }
 
+  /** 体检项的「去配置」：同页分区滚过去，大师包在别的境界，交给外层换境界。 */
+  function goToCheckupTarget(target: string) {
+    if (target === "vault") {
+      onGoVault?.();
+      return;
+    }
+    document.getElementById(target)?.scrollIntoView?.({ block: "start" });
+  }
+
   /** 体检清单：必备项决定能不能跑通会诊，其余只是提醒。 */
   function checkupItems(): readonly CheckupItem[] {
     const enabledPlatforms = platforms.filter((item) => item.enabled);
@@ -397,6 +411,7 @@ export function SelfRealm({
           networking === true
             ? "每次提问都会留下记录，费用也按这里记账"
             : "关着的时候，模型与外部数据源都调不动",
+        target: "setting-models",
       },
       {
         key: "platform",
@@ -413,6 +428,7 @@ export function SelfRealm({
           platforms.length === 0
             ? "在下面「大模型」里填服务地址与模型名"
             : "确认要用的那个已经启用",
+        target: "setting-models",
       },
       {
         key: "credential",
@@ -426,6 +442,7 @@ export function SelfRealm({
               ? "已写入"
               : `缺 ${missingKeys.map((item) => item.code).join("、")}`,
         hint: "密钥存系统密钥库，条目名按 thought-forge/platform/平台代码",
+        target: "setting-models",
       },
       {
         key: "masters",
@@ -437,6 +454,7 @@ export function SelfRealm({
           masters.length > 0
             ? "会诊的可选席位来自这里"
             : "去「藏」境界点「安装种子大师包」",
+        target: "vault",
       },
       {
         key: "capture",
@@ -451,6 +469,7 @@ export function SelfRealm({
               : "全关"
           : "读取中",
         hint: "默认全关。要用再开，不用就关掉，少攒无关数据",
+        target: "setting-usage",
       },
       {
         key: "backup",
@@ -459,6 +478,7 @@ export function SelfRealm({
         required: false,
         state: presentBackups > 0 ? `有 ${presentBackups} 份` : "还没有",
         hint: "动手实测前先备一份，出问题能退回来",
+        target: "setting-backup",
       },
     ];
   }
@@ -1189,7 +1209,15 @@ export function SelfRealm({
               <span className="checkup__state mono">{item.state}</span>
               <span className="checkup__hint">
                 {item.hint}
-                {item.required ? "" : "（可选，不算门槛）"}
+                {item.required ? "" : "（可选，不算门槛）"}{" "}
+                <button
+                  className="checkup__go"
+                  type="button"
+                  aria-label={`去配置：${item.label}`}
+                  onClick={() => goToCheckupTarget(item.target)}
+                >
+                  去配置
+                </button>
               </span>
             </li>
           ))}

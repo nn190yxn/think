@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { SelfRealm } from "./SelfRealm";
 import { IpcProvider } from "../app/ipc";
@@ -445,6 +445,45 @@ describe("我境界 · 成长轨迹", () => {
 
     expect(within(panel).getByText("今日花费")).toBeInTheDocument();
     expect(within(panel).getByText("本月花费")).toBeInTheDocument();
+  });
+
+  it("体检六项各有「去配置」，同页的滚到分区，大师包交给外壳换境界", async () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoViewMock(this: Element) {
+      scrolled.push(this.id);
+    };
+    const goVault = vi.fn();
+    try {
+      render(
+        <IpcProvider>
+          <SelfRealm
+            theme="kiln"
+            onThemeChange={() => undefined}
+            preferences={DEFAULT_PREFERENCES}
+            onPreferencesChange={() => undefined}
+            onGoVault={goVault}
+          />
+        </IpcProvider>,
+      );
+      await showSystem();
+      const heading = await screen.findByRole("heading", { name: "体检清单" });
+      const panel = heading.closest(".panel") as HTMLElement;
+
+      // 六项体检一项不落，每项都有出口。
+      const buttons = within(panel).getAllByRole("button", { name: /^去配置：/ });
+      expect(buttons).toHaveLength(6);
+
+      await userEvent.click(within(panel).getByRole("button", { name: "去配置：联网能力" }));
+      expect(scrolled).toContain("setting-models");
+
+      // 大师包不在设置页，只能换境界，不能去滚一个不存在的分区。
+      await userEvent.click(within(panel).getByRole("button", { name: "去配置：大师包" }));
+      expect(goVault).toHaveBeenCalledTimes(1);
+      expect(scrolled).not.toContain("vault");
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 
   it("历史回顾把各来源合并成一条流水", async () => {

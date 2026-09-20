@@ -403,9 +403,9 @@ pub fn seed_install_once(app: &tauri::AppHandle) -> thought_forge_core::CoreResu
 mod seed_install_tests {
     use super::*;
 
-    /// 种子目录里的六个包都能装上，且没有失败项。
+    /// 种子目录里的每个包都能装上，且没有失败项（名册现为二十位）。
     #[test]
-    fn install_all_installs_the_six_seed_packs() {
+    fn install_all_installs_every_seed_pack() {
         let dir = std::env::temp_dir().join(format!("forge-seed-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("建临时目录");
@@ -416,7 +416,7 @@ mod seed_install_tests {
             .expect("仓库根")
             .join("seed-packs");
         let report = install_all(&root, &mut conn).expect("安装种子包");
-        assert_eq!(report.installed.len(), 6);
+        assert_eq!(report.installed.len(), 20);
         assert!(report.failures.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }

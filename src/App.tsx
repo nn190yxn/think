@@ -136,6 +136,7 @@ export function App() {
               onPreferencesChange={updatePreferences}
               view={selfView}
               onViewChange={setSelfView}
+              onGoVault={() => goRealm("vault")}
             />
           ) : null}
         </div>

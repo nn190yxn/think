@@ -37,6 +37,13 @@ describe("点将排序与落座", () => {
     );
   });
 
+  it("没有单元时按六题顺序回退声明层，与内核 primary_layer 一致", () => {
+    const base = DEMO_SUMMARIES[0]!;
+    // 声明层顺序故意反着写：内核取「道法术气器势」里最靠前的，不取数组第一个。
+    const bare = { ...base, layers: ["tool", "fa"], layerProfile: [] } as typeof base;
+    expect(deepestLayer(bare, new Set())).toBe("fa");
+  });
+
   it("深浅并列时按道法术气器势取前一题", () => {
     const inamori = DEMO_SUMMARIES.find((master) => master.id === "okada-kazuo")!;
     expect(deepestLayer(inamori, new Set())).toBe("dao");
