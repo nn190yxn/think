@@ -1724,6 +1724,16 @@ export const stubTransport: CommandTransport = {
         const refName = `thought-forge/${String(payload.scope ?? "")}/${String(payload.ownerId ?? "")}`;
         return { ok: true, data: demoCredentials.has(refName) };
       }
+      case "diagnostics_write": {
+        const fileName = String(payload.fileName ?? "");
+        return {
+          ok: true,
+          data: {
+            path: `（演示）${fileName}`,
+            bytes: String(payload.content ?? "").length,
+          },
+        };
+      }
       case "model_probe":
         return { ok: true, data: DEMO_PROBE };
       default:

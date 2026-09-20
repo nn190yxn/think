@@ -447,6 +447,41 @@ describe("我境界 · 成长轨迹", () => {
     expect(within(panel).getByText("本月花费")).toBeInTheDocument();
   });
 
+  it("诊断包只导出配置摘要，不含密钥本体", async () => {
+    const sent: { fileName: string; content: string }[] = [];
+    const client = createCommandClient({
+      invoke: async (name, request) => {
+        if (name === "diagnostics_write") {
+          const payload = request as { fileName: string; content: string };
+          sent.push(payload);
+          return {
+            ok: true,
+            data: { path: `C:/demo/${payload.fileName}`, bytes: payload.content.length },
+          };
+        }
+        return stubTransport.invoke(name, request);
+      },
+    });
+    render(
+      <IpcProvider client={client}>
+        <RealmHarness />
+      </IpcProvider>,
+    );
+    await showSystem();
+    const heading = await screen.findByRole("heading", { name: "体检清单" });
+    const panel = heading.closest(".panel") as HTMLElement;
+    await userEvent.click(within(panel).getByRole("button", { name: "导出诊断包" }));
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.fileName).toMatch(/^diagnostics-.*\.json$/);
+    const summary = JSON.parse(sent[0]!.content) as Record<string, unknown>;
+    expect(summary.masters).toBeGreaterThan(0);
+    expect(summary).toHaveProperty("checkup");
+    // 只记「有没有写入」：整份正文不出现密钥字段名或密钥样式。
+    expect(sent[0]!.content).not.toMatch(/apiKey|secret|sk-/i);
+    expect(await within(panel).findByText(/已写出/)).toBeInTheDocument();
+  });
+
   it("体检六项各有「去配置」，同页的滚到分区，大师包交给外壳换境界", async () => {
     const scrolled: string[] = [];
     const original = Element.prototype.scrollIntoView;

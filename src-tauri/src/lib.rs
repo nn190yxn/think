@@ -4,6 +4,7 @@ mod capture_win;
 mod commands;
 mod connector;
 mod credential;
+mod diagnostics;
 mod discovery;
 mod model;
 mod protocol;
@@ -162,6 +163,7 @@ pub fn run() {
             commands::backup_restore,
             commands::credential_set,
             commands::credential_status,
+            diagnostics::diagnostics_write,
         ])
         .run(tauri::generate_context!())
         .expect("思想熔炉启动失败");

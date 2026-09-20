@@ -381,6 +381,63 @@ export function SelfRealm({
     return tuningDraft[item.key] ?? item.value;
   }
 
+  const [diagnosticsNote, setDiagnosticsNote] = useState<string | null>(null);
+
+  /**
+   * 诊断包：把体检与配置摘要写成 JSON 交给排查。
+   * 密钥只记「有没有写入」，不写密钥本体。
+   */
+  async function exportDiagnostics() {
+    setDiagnosticsNote(null);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const summary = {
+      generatedAt: new Date().toISOString(),
+      app: {
+        version: app.data?.version ?? null,
+        schemaVersion: db.data?.schemaVersion ?? null,
+        journalMode: db.data?.journalMode ?? null,
+      },
+      networking,
+      checkup: checkupItems(),
+      masters: masters.length,
+      backups: backups.filter((item) => item.present).length,
+      platforms: platforms.map((item) => ({
+        code: item.code,
+        enabled: item.enabled,
+        keyWritten: credentialKnown[`platform:${item.code}`] === true,
+      })),
+      capture: capture
+        ? {
+            paused: capture.paused,
+            capabilities: capture.capabilities.map((item) => ({
+              kind: item.kind,
+              enabled: item.enabled,
+              available: item.available,
+            })),
+          }
+        : null,
+      cost: cost
+        ? {
+            currency: cost.currency,
+            todayMicros: cost.todayMicros,
+            monthMicros: cost.monthMicros,
+            dailyLimitMicros: cost.dailyLimitMicros,
+            monthlyLimitMicros: cost.monthlyLimitMicros,
+          }
+        : null,
+      recentCalls: calls.length,
+    };
+    try {
+      const result = await client.call("diagnostics_write", {
+        fileName: `diagnostics-${stamp}.json`,
+        content: JSON.stringify(summary, null, 2),
+      });
+      setDiagnosticsNote(`已写出 ${result.bytes} 字节：${result.path}`);
+    } catch (cause) {
+      setDiagnosticsNote(cause instanceof Error ? cause.message : "诊断包导出失败");
+    }
+  }
+
   /** 体检项的「去配置」：同页分区滚过去，大师包在别的境界，交给外层换境界。 */
   function goToCheckupTarget(target: string) {
     if (target === "vault") {
@@ -1222,6 +1279,24 @@ export function SelfRealm({
             </li>
           ))}
         </ul>
+
+        <div className="setting-row">
+          <span className="setting-row__label">诊断包</span>
+          <button
+            className="connector__test"
+            type="button"
+            onClick={() => void exportDiagnostics()}
+          >
+            导出诊断包
+          </button>
+        </div>
+        <p className="setting-row__hint">
+          写出一份 JSON：版本、数据格式、体检结论、平台与采集开关、费用与备份份数。
+          密钥只记「有没有写入」，不写密钥本体；文件落在数据目录里。
+        </p>
+        {diagnosticsNote ? (
+          <p className="setting-row__hint mono">{diagnosticsNote}</p>
+        ) : null}
 
         <h3 className="section-head section-head--minor">使用概览</h3>
         {cost ? (

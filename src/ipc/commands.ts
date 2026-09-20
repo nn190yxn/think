@@ -1747,6 +1747,10 @@ export interface CommandMap {
     response: boolean;
   };
   model_probe: { request: Record<string, never>; response: ModelProbeOutcome };
+  diagnostics_write: {
+    request: { fileName: string; content: string };
+    response: { path: string; bytes: number };
+  };
 }
 
 export type CommandName = keyof CommandMap;
@@ -1885,4 +1889,5 @@ export const COMMAND_NAMES: readonly CommandName[] = [
   "credential_set",
   "credential_status",
   "model_probe",
+  "diagnostics_write",
 ];
