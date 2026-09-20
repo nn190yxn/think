@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use thought_forge_core::corpus;
 use thought_forge_core::db::{self, migrations};
 use thought_forge_core::master::{repo, Layer, LAYER_ORDER};
+use thought_forge_core::council::pool::{self as pool_repo, TopicInput};
 
 fn memory_db() -> rusqlite::Connection {
     let mut conn = db::open_in_memory().expect("内存库可打开");
@@ -59,6 +60,56 @@ fn every_seed_pack_installs_and_covers_all_six_layers() {
     // 覆盖矩阵的层次顺序固定为道法术气器势。
     let order: Vec<Layer> = matrix.layers.iter().map(|entry| entry.layer).collect();
     assert_eq!(order, LAYER_ORDER.to_vec());
+}
+
+#[test]
+fn every_seed_pack_covers_all_six_layers_in_its_own_units() {
+    let mut conn = memory_db();
+    for dir in &pack_dirs() {
+        repo::install(&mut conn, dir).unwrap();
+    }
+
+    let topic = TopicInput {
+        question: "该不该动手",
+        domains: &[],
+    };
+    let masters = pool_repo::build(&conn, &topic).unwrap();
+    assert_eq!(masters.candidates.len(), 6, "六个种子包各一位大师");
+
+    for master in &masters.candidates {
+        for layer in LAYER_ORDER {
+            let depth = master.layer_depth.get(&layer).copied().unwrap_or(0);
+            assert!(
+                depth > 0,
+                "{} 在 {:?} 题没有单元，六题收口未达成",
+                master.name,
+                layer
+            );
+        }
+    }
+}
+
+#[test]
+fn every_seed_pack_corpus_is_searchable_by_its_title() {
+    let mut conn = memory_db();
+    for dir in &pack_dirs() {
+        repo::install(&mut conn, dir).unwrap();
+    }
+
+    let items = corpus::repo::list(&conn, None).unwrap();
+    assert_eq!(items.len(), 6, "六个种子包各一份语料");
+
+    for item in &items {
+        let hits = corpus::repo::search(&conn, &item.title, None).unwrap();
+        for master_id in &item.master_ids {
+            assert!(
+                hits.iter().any(|hit| hit.item.master_ids.contains(master_id)),
+                "语料《{}》按标题检索不到它的大师 {}",
+                item.title,
+                master_id
+            );
+        }
+    }
 }
 
 #[test]
