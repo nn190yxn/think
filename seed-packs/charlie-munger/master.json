@@ -4,13 +4,32 @@
   "id": "charlie-munger",
   "name": "查理·芒格",
   "domain": "投资",
-  "layers": ["fa", "tool"],
+  "layers": ["dao", "fa", "shu", "qi", "tool", "shi"],
   "version": 1,
   "summary": "用多元思维模型与逆向排除法，把判断变成可复用的检查清单。",
   "style": "冷静直接，先排除错误答案，再谈正确答案，偏好清单与常识。",
-  "blindSpots": "对需要快速试错的早期创新场景，等待成本可能过高。",
-  "note": "种子包，语料为公开演讲要点摘录。",
+  "blindSpots": "对需要快速试错的早期创新场景，等待成本可能过高；方法依赖长期大量阅读的积累。",
+  "note": "种子包。材料为公开演讲与访谈（1994 南加州大学、1995 哈佛法学院《人类误判心理学》）与《穷查理宝典》篇目，非原文逐字复制；标「转述」者为要点归纳。详见 distill/charlie-munger/sources/README.md。",
   "units": [
+    {
+      "title": "配得上",
+      "layer": "dao",
+      "triggerCondition": "当你想得到一个位置、机会或关系，正在盘算怎么争取时。",
+      "steps": [
+        "把想要的东西写成一句话，并写清它要求你具备什么。",
+        "逐条对照自己现在具备什么、缺什么。",
+        "先补齐最关键的那一项，再谈争取。"
+      ],
+      "mechanism": "把「如何得到」换成「如何配得上」，把注意力从外部争夺转回自身可积累的资质。",
+      "boundary": "适用于长期关系与声誉类目标；抢时间窗口的短期机会，等配得上就已错过。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "要得到你想要的某样东西，最可靠的办法是让自己配得上它。",
+          "location": "notes.md 第 3 节（原话，芒格多次演讲反复出现）"
+        }
+      ]
+    },
     {
       "title": "逆向排除",
       "layer": "fa",
@@ -26,7 +45,64 @@
         {
           "corpusRef": "corpus/notes.md",
           "excerpt": "反过来想，总是反过来想。",
-          "location": "notes.md 第 1 节"
+          "location": "notes.md 第 1 节（1995 哈佛法学院演讲，Invert, always invert）"
+        }
+      ]
+    },
+    {
+      "title": "激励结构优先",
+      "layer": "fa",
+      "triggerCondition": "当一套制度、规则或考核反复被绕过，或者你判断不出某个人为什么那样做时。",
+      "steps": [
+        "先不评价人的品行，把「他被什么奖励、被什么惩罚」写下来。",
+        "推演这套奖惩会长期催生什么行为，而不是声明什么行为。",
+        "若催生的行为与目标不一致，改奖励结构，别改口号。"
+      ],
+      "mechanism": "人的行为主要由激励结构塑形，且当事人往往不自知；改激励比讲道理有效。",
+      "boundary": "不适用于纯一次性、无重复博弈的场景；也不能用来替当事人的责任开脱。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "永远不要低估激励的力量——在你该思考激励的时候，绝不要去想别的东西。（Never, ever, think about something else when you should be thinking about the power of incentives.）",
+          "location": "notes.md 第 7 节（1995 哈佛演讲首条倾向；联邦快递按班次计薪案例）"
+        }
+      ]
+    },
+    {
+      "title": "等好球再挥棒",
+      "layer": "shu",
+      "triggerCondition": "当你手上有资金、时间或精力，觉得总该马上做点什么的时候。",
+      "steps": [
+        "先写下你在等的那个条件：什么样才算好机会。",
+        "把当前候选逐个对照条件，不符合的直接划掉。",
+        "没有符合项时，允许自己什么都不做，并把「等待」当作计划的一部分写下来。"
+      ],
+      "mechanism": "把不行动也当成一个可选动作，用明确的入场条件替代「随时都该出手」的焦虑。",
+      "boundary": "前提是入场条件本身可判断；条件说不清时，等待会退化成拖延。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "把击球区划成许多格子，只有落在最甜那格的球才挥棒。（转述，源自对泰德·威廉姆斯击球区的引用）",
+          "location": "notes.md 第 4 节"
+        }
+      ]
+    },
+    {
+      "title": "戒嫉妒、怨恨与自怜",
+      "layer": "qi",
+      "triggerCondition": "当你因为别人的结果难受，或反复回想一件对你不公的事时。",
+      "steps": [
+        "承认情绪存在，写下它具体针对谁、针对哪件事。",
+        "问一句：这个情绪能改变结果吗。答不能，就停在这里。",
+        "把这份精力转到一件今天就能推进的事上。"
+      ],
+      "mechanism": "把嫉妒、怨恨、自怜当成直接消耗心力的支出项，用「能否改变结果」作止损线。",
+      "boundary": "不适用于需要正视的伤害与边界问题——先处理事实，再处理情绪。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "嫉妒是七宗罪里最愚蠢的一种，因为它不会带来任何快乐，只会让你痛苦。",
+          "location": "notes.md 第 5 节（原话，出自《穷查理宝典》人类误判心理学相关论述）"
         }
       ]
     },
@@ -45,7 +121,26 @@
         {
           "corpusRef": "corpus/notes.md",
           "excerpt": "手里只有锤子的人，看什么都像钉子。",
-          "location": "notes.md 第 2 节"
+          "location": "notes.md 第 2 节（1994 南加州大学演讲，铁锤人倾向）"
+        }
+      ]
+    },
+    {
+      "title": "少数机会下重注",
+      "layer": "shi",
+      "triggerCondition": "当你确信自己看懂了，且赔率明显偏向你的时候。",
+      "steps": [
+        "确认这不是常有的机会，而是一次少见的错价。",
+        "确认这件事落在自己的能力圈之内。",
+        "在可承受损失的前提下，把投入加到与确信度相称的量级。"
+      ],
+      "mechanism": "长期收益集中在少数几次判断上，日常的均匀下注会稀释真正的机会。",
+      "boundary": "确信极易被自我说服污染；没有能力圈与安全边际作前提时，下重注等于赌。",
+      "evidence": [
+        {
+          "corpusRef": "corpus/notes.md",
+          "excerpt": "一生中真正的机会不多，问题在于机会来时敢不敢下重注。（转述）",
+          "location": "notes.md 第 6 节"
         }
       ]
     }
@@ -55,7 +150,7 @@
       "ref": "corpus/notes.md",
       "kind": "摘录",
       "title": "芒格思维要点",
-      "locationHint": "公开演讲要点整理"
+      "locationHint": "1994 USC 演讲、1995 哈佛演讲、穷查理宝典篇目"
     }
   ]
 }

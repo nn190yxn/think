@@ -297,12 +297,12 @@ fn default_selection_covers_all_six_layers() {
 
     assert_eq!(plan.seats.len(), 6, "默认六席");
     assert_eq!(plan.layers.len(), 6, "六层各取一位");
-    // 种子库里术与势各只有一位大师，站得上去但凑不出同题对立的第二人，
-    // 因此这两题记为缺口；其余四题在池中都有至少两位可用大师。
+    // 芒格补到六题覆盖后，六题都有至少两位可站的大师（他新增了术与势两条单元），
+    // 因此默认选角不再出现缺口题；缺口逻辑由单题大师的专用用例覆盖。
     assert_eq!(
         plan.gaps,
-        vec![Layer::Shu, Layer::Shi],
-        "缺口题应按道法术气器势排序"
+        Vec::<Layer>::new(),
+        "六题都能凑出同题对立时不应有缺口题"
     );
 }
 
@@ -361,7 +361,11 @@ fn rotation_does_not_add_gap_questions() {
         &select::SelectionRequest::new(Strategy::Steady),
     )
     .expect("首次选角");
-    assert_eq!(initial.gaps, vec![Layer::Shu, Layer::Shi], "种子库的缺口题");
+    assert!(
+        initial.gaps.is_empty(),
+        "种子库六题都有对立来源，实际缺口：{:?}",
+        initial.gaps
+    );
 
     let previous: Vec<SeatRef> = initial
         .seats
