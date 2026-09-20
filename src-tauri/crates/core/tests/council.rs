@@ -233,7 +233,12 @@ fn install_fa_master(
 fn pairings_are_precomputed_for_every_master_pair() {
     let conn = seeded_db();
     let map = pairings::load(&conn).expect("可读取对立度");
-    assert_eq!(map.len(), 15, "六位大师共 15 对");
+    let master_count = build_pool(&conn).candidates.len();
+    assert_eq!(
+        map.len(),
+        master_count * (master_count - 1) / 2,
+        "每位大师两两配对"
+    );
     for score in map.values() {
         assert!(*score >= 0.0 && *score <= 1.0, "对立度应落在 0 到 1 之间");
     }
@@ -256,7 +261,12 @@ fn installing_a_master_recomputes_pairings_without_extra_calls() {
 fn layer_pairings_cover_every_pair_and_question() {
     let conn = seeded_db();
     let map = pairings::load_by_layer(&conn).expect("可读取同题对立度");
-    assert_eq!(map.len(), 15, "六位大师共 15 对");
+    let master_count = build_pool(&conn).candidates.len();
+    assert_eq!(
+        map.len(),
+        master_count * (master_count - 1) / 2,
+        "每位大师两两配对"
+    );
     for by_layer in map.values() {
         assert_eq!(by_layer.len(), 6, "每一对都要有六题的对立度");
         for score in by_layer.values() {
