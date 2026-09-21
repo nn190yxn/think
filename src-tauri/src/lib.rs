@@ -3,6 +3,8 @@ mod capture;
 mod capture_win;
 mod commands;
 mod connector;
+#[cfg(test)]
+mod connector_probe;
 mod credential;
 mod diagnostics;
 mod discovery;
