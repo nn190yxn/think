@@ -5,6 +5,8 @@ mod commands;
 mod connector;
 #[cfg(test)]
 mod connector_probe;
+#[cfg(test)]
+mod credential_probe;
 mod credential;
 mod diagnostics;
 mod discovery;

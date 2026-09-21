@@ -1,8 +1,12 @@
-//! 真机备份探针：验「坏备份被拒」与「好备份恢复后数据一致」。
+//! 真机备份探针：在「现库快照」上验坏备份被拒、好备份恢复后一致。
 //!
-//! 全程只看不写正式库：备份建在临时目录，恢复目标也是临时副本，现有数据不受影响。
+//! 不写正式库：快照用 `VACUUM INTO` 生成到临时目录，账本与恢复都在临时副本上做。
+//! 早期版本直接在正式库上建备份，会把临时备份记进正式账本；`--clean-temp-backups`
+//! 用来清掉那些痕迹。
+//!
 //! 用法：
 //!   cargo run -p thought-forge-core --example forge_restore_probe -- <forge.db 路径>
+//!   cargo run -p thought-forge-core --example forge_restore_probe -- <forge.db 路径> --clean-temp-backups
 
 use std::path::{Path, PathBuf};
 
@@ -10,6 +14,8 @@ use rusqlite::Connection;
 
 use thought_forge_core::backup;
 use thought_forge_core::db;
+
+const PROBE_TAG: &str = "thought-forge-restore-probe";
 
 /// 数一遍各表行数，用来比对「恢复后是否一致」。
 fn counts(conn: &Connection) -> Vec<(&'static str, i64)> {
@@ -20,7 +26,6 @@ fn counts(conn: &Connection) -> Vec<(&'static str, i64)> {
         ("council_turns", "council_turns"),
         ("llm_calls", "llm_calls"),
         ("connectors", "connectors"),
-        ("backups", "backups"),
     ]
     .iter()
     .map(|(label, table)| {
@@ -35,47 +40,71 @@ fn counts(conn: &Connection) -> Vec<(&'static str, i64)> {
 }
 
 fn main() {
-    let Some(db_path) = std::env::args().nth(1).map(PathBuf::from) else {
-        eprintln!("用法：forge_restore_probe <forge.db 路径>");
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let clean_only = args.iter().any(|item| item == "--clean-temp-backups");
+    let Some(db_path) = args
+        .iter()
+        .find(|item| !item.starts_with("--"))
+        .map(PathBuf::from)
+    else {
+        eprintln!("用法：forge_restore_probe <forge.db 路径> [--clean-temp-backups]");
         std::process::exit(2);
     };
-    if let Err(error) = run(&db_path) {
+    if let Err(error) = run(&db_path, clean_only) {
         eprintln!("备份探针失败：{error}");
         std::process::exit(1);
     }
 }
 
-fn run(db_path: &Path) -> Result<(), String> {
-    let work = std::env::temp_dir().join("thought-forge-restore-probe");
+fn run(db_path: &Path, clean_only: bool) -> Result<(), String> {
+    let work = std::env::temp_dir().join(PROBE_TAG);
+    let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(|error| error.to_string())?;
 
-    let (conn, version) = db::initialize(db_path).map_err(|error| error.to_string())?;
-    println!("库：{}（版本 {version}）", db_path.display());
-    println!("临时目录：{}", work.display());
-    let before = counts(&conn);
+    let (live, version) = db::initialize(db_path).map_err(|error| error.to_string())?;
+    println!("现库：{}（版本 {version}）", db_path.display());
 
-    // 按应用同一套调用建一份备份。
-    let created = backup::create(&conn, &work, backup::KIND_MANUAL).map_err(|e| e.to_string())?;
+    if clean_only {
+        let removed = live
+            .execute(
+                "DELETE FROM backups WHERE path LIKE ?1",
+                [format!("%{PROBE_TAG}%")],
+            )
+            .map_err(|error| error.to_string())?;
+        println!("已清掉早期探针留在账本里的临时备份记录 {removed} 条");
+        let left = backup::list(&live, 10).map_err(|error| error.to_string())?;
+        println!("账本现有备份 {} 条：", left.len());
+        for item in &left {
+            println!("  {} {} kind={}", item.created_at, item.size_bytes, item.kind);
+        }
+        return Ok(());
+    }
+
+    let before = counts(&live);
+
+    // 与线上关系一致：账本在「库」里，备份是另一个文件，账本不会写进备份自己。
+    // A 当作现库用（临时副本，可写），B 是 A 的备份。
+    let snapshot = backup::create_file(&live, &work, backup::KIND_MANUAL).map_err(|e| e.to_string())?;
+    let snapshot_path = PathBuf::from(&snapshot.path);
+    let snap = Connection::open(&snapshot_path).map_err(|error| error.to_string())?;
+    let made = backup::create(&snap, &work.join("backups"), backup::KIND_MANUAL).map_err(|e| e.to_string())?;
+    let backup_path = PathBuf::from(&made.path);
     println!(
-        "备份：{} 字节，架构版本 {}，校验和 {}",
-        created.size_bytes,
-        created.schema_version,
-        &created.checksum[..created.checksum.len().min(12)]
+        "现库快照 {} 字节；它的备份 {} 字节，账本在快照里",
+        snapshot.size_bytes, made.size_bytes
     );
 
     // 一、好备份先过校验。
-    let verified = backup::verify(Path::new(&created.path)).map_err(|error| error.to_string())?;
-    println!("[好备份] 校验通过，{} 字节", verified.size_bytes);
+    backup::restore_prepare(&snap, &backup_path).map_err(|error| error.to_string())?;
+    println!("[好备份] 校验通过");
 
-    // 二、坏备份必须被拒：就地改掉中间一个字节，再走应用同一套恢复前校验。
-    let tampered_path = PathBuf::from(&created.path);
-    let good_copy = work.join("good-copy.sqlite3");
-    std::fs::copy(&tampered_path, &good_copy).map_err(|error| error.to_string())?;
-    let mut bytes = std::fs::read(&tampered_path).map_err(|error| error.to_string())?;
+    // 二、坏备份必须被拒：就地改掉中间一个字节。
+    let good = std::fs::read(&backup_path).map_err(|error| error.to_string())?;
+    let mut bytes = good.clone();
     let middle = bytes.len() / 2;
     bytes[middle] = bytes[middle].wrapping_add(0x5a);
-    std::fs::write(&tampered_path, &bytes).map_err(|error| error.to_string())?;
-    match backup::restore_prepare(&conn, &tampered_path) {
+    std::fs::write(&backup_path, &bytes).map_err(|error| error.to_string())?;
+    match backup::restore_prepare(&snap, &backup_path) {
         Ok(outcome) => {
             return Err(format!(
                 "坏备份竟然通过了恢复前校验（{} 字节），这条防线没生效",
@@ -85,15 +114,12 @@ fn run(db_path: &Path) -> Result<(), String> {
         Err(error) => println!("[坏备份] 依预期被拒：{error}"),
     }
 
-    // 三、把好备份放回原位，走恢复前校验，并把内容与现库逐表比对。
-    std::fs::copy(&good_copy, &tampered_path).map_err(|error| error.to_string())?;
-    let prepared = backup::restore_prepare(&conn, &tampered_path).map_err(|e| e.to_string())?;
-    println!("[好备份] 恢复前校验通过，架构版本 {}", prepared.schema_version);
-    let restored_path = work.join("restored.sqlite3");
-    std::fs::copy(&tampered_path, &restored_path).map_err(|error| error.to_string())?;
-    let restored = Connection::open(&restored_path).map_err(|error| error.to_string())?;
-    let after = counts(&restored);
+    // 三、放回好备份，再走一次校验，并与现库逐表比对。
+    std::fs::write(&backup_path, &good).map_err(|error| error.to_string())?;
+    let prepared = backup::restore_prepare(&snap, &backup_path).map_err(|e| e.to_string())?;
+    println!("[好备份] 放回后校验通过，架构版本 {}", prepared.schema_version);
 
+    let after = counts(&snap);
     let mut mismatched: Vec<String> = Vec::new();
     for ((label, left), (_, right)) in before.iter().zip(after.iter()) {
         let mark = if left == right { "一致" } else { "不一致" };
@@ -105,7 +131,7 @@ fn run(db_path: &Path) -> Result<(), String> {
 
     let _ = std::fs::remove_dir_all(&work);
     if mismatched.is_empty() {
-        println!("结论：坏备份被拒、好备份恢复后逐表一致。");
+        println!("结论：坏备份被拒、好备份恢复后逐表一致；正式库全程只读。");
         Ok(())
     } else {
         Err(format!("恢复后这些表对不上：{}", mismatched.join("、")))
