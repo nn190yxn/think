@@ -215,9 +215,46 @@ pub fn prune(conn: &Connection, keep: i64) -> CoreResult<i64> {
     Ok(removed)
 }
 
-/// 恢复准备：先校验，再返回待替换的文件信息。
-pub fn restore_prepare(path: &Path) -> CoreResult<BackupOutcome> {
-    verify(path)
+/// 恢复准备：先看文件本身，再与账本里登记时的摘要核对，两关都过才允许替换。只看文件本身挡不住篡改：改坏的库多数仍能被 SQLite 打开；账本里查不到的路径也一律拒绝。
+pub fn restore_prepare(conn: &Connection, path: &Path) -> CoreResult<BackupOutcome> {
+    let outcome = verify(path)?;
+    if !crate::db::table_exists(conn, "backups")? {
+        return Err(CoreError::InvalidInput(
+            "备份账本不存在，拒绝恢复".to_string(),
+        ));
+    }
+    let recorded = {
+        let mut stmt = conn.prepare(
+            "SELECT checksum, size_bytes FROM backups
+             WHERE path = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query([&outcome.path])?;
+        match rows.next()? {
+            Some(row) => Some((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            None => None,
+        }
+    };
+    let Some((checksum, size_bytes)) = recorded else {
+        return Err(CoreError::InvalidInput(format!(
+            "{} 不在备份账本里，拒绝恢复",
+            outcome.path
+        )));
+    };
+    if checksum != outcome.checksum {
+        let head = |value: &str| value[..value.len().min(12)].to_string();
+        return Err(CoreError::InvalidInput(format!(
+            "备份摘要与登记时不一致（登记 {}，现在是 {}），文件可能被改过，拒绝恢复",
+            head(&checksum),
+            head(&outcome.checksum)
+        )));
+    }
+    if size_bytes != outcome.size_bytes {
+        return Err(CoreError::InvalidInput(format!(
+            "备份大小与登记时不一致（登记 {size_bytes} 字节，现在是 {} 字节），拒绝恢复",
+            outcome.size_bytes
+        )));
+    }
+    Ok(outcome)
 }
 
 /// 迁移前是否需要自动备份。设置缺失或不可解析时按需要处理。

@@ -35,9 +35,10 @@ fn create_writes_file_and_ledger() {
 fn verify_rejects_corrupted_file() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("broken.sqlite3");
+    let conn = db();
     std::fs::write(&path, b"this is not a sqlite database").unwrap();
 
-    let error = backup::restore_prepare(&path).unwrap_err();
+    let error = backup::restore_prepare(&conn, &path).unwrap_err();
     assert!(
         error.code() == "E_DB" || error.code() == "E_INVALID_INPUT",
         "损坏文件应被拒绝，实际为 {}",

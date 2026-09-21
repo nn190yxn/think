@@ -2520,7 +2520,7 @@ pub fn backup_restore(state: State<'_, AppState>, path: String) -> CommandResult
     let conn = lock(&state);
     let result = (|| -> CoreResult<BackupOutcome> {
         let source = PathBuf::from(&path);
-        let outcome = backup::restore_prepare(&source)?;
+        let outcome = backup::restore_prepare(&conn, &source)?;
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         std::fs::copy(&source, &state.db_path)?;
         Ok(outcome)
