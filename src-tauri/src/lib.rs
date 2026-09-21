@@ -6,7 +6,7 @@ mod connector;
 mod credential;
 mod diagnostics;
 mod discovery;
-mod model;
+pub mod model;
 mod protocol;
 mod state;
 
