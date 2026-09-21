@@ -21,6 +21,15 @@ const PLATFORM_CODE: &str = "dashscope";
 const DEFAULT_ENDPOINT: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
 const DEFAULT_MODEL: &str = "qwen-plus";
 
+/// 取环境变量里的覆盖值：接本地替身服务时用得上（平台号、地址、模型名）。
+fn env_or(key: &str, fallback: &str) -> String {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let Some(db_path) = args.next() else {
@@ -44,10 +53,10 @@ fn run(db_path: PathBuf, question: &str) -> Result<(), String> {
 
     // 端点必须填到 /chat/completions 那一段：请求按原样当作地址用。
     let input = PlatformInput {
-        code: PLATFORM_CODE.to_string(),
-        display_name: "DashScope（通义千问）".to_string(),
-        endpoint: DEFAULT_ENDPOINT.to_string(),
-        model_name: DEFAULT_MODEL.to_string(),
+        code: env_or("FORGE_PLATFORM_CODE", PLATFORM_CODE),
+        display_name: "会诊探针平台".to_string(),
+        endpoint: env_or("FORGE_ENDPOINT", DEFAULT_ENDPOINT),
+        model_name: env_or("FORGE_MODEL", DEFAULT_MODEL),
         input_price_micros_per_1k: 800,
         output_price_micros_per_1k: 2000,
         currency: "CNY".to_string(),
@@ -56,6 +65,13 @@ fn run(db_path: PathBuf, question: &str) -> Result<(), String> {
     let view = platform::upsert(&conn, &input).map_err(|error| error.to_string())?;
     let view =
         platform::set_enabled(&conn, &view.code, true).map_err(|error| error.to_string())?;
+    // 跑完可以用 FORGE_DISABLE=1 把它关掉，免得界面里留着一条指向本机替身服务的死配置。
+    if env_or("FORGE_DISABLE", "0") == "1" {
+        let view =
+            platform::set_enabled(&conn, &view.code, false).map_err(|error| error.to_string())?;
+        println!("平台 {} 已关闭（状态 {}）", view.code, view.status);
+        return Ok(());
+    }
     println!(
         "平台：{} · {} · {}",
         view.code, view.model_name, view.status
@@ -87,10 +103,34 @@ fn run(db_path: PathBuf, question: &str) -> Result<(), String> {
     if let Some(panel) = repo::latest_panel(&conn, &session).map_err(|error| error.to_string())? {
         println!("阵容 {} 席：", panel.seats.len());
         for seat in &panel.seats {
-            let name = masters::detail(&conn, &seat.master_id)
-                .map(|detail| detail.name)
-                .unwrap_or_else(|_| seat.master_id.clone());
-            println!("  · {name} → 第 {:?} 题", seat.layer);
+            let detail = masters::detail(&conn, &seat.master_id).ok();
+            let name = detail
+                .as_ref()
+                .map(|detail| detail.name.clone())
+                .unwrap_or_else(|| seat.master_id.clone());
+            let depth = detail
+                .as_ref()
+                .and_then(|detail| {
+                    detail
+                        .layer_profile
+                        .iter()
+                        .find(|profile| profile.layer == seat.layer)
+                })
+                .map(|profile| profile.unit_count)
+                .unwrap_or(0);
+            let deepest = detail
+                .as_ref()
+                .and_then(|detail| detail.layer_profile.iter().map(|p| p.unit_count).max())
+                .unwrap_or(0);
+            let verdict = if deepest > 0 && depth >= deepest {
+                "就是本人最深的一题"
+            } else {
+                "非本人最深"
+            };
+            println!(
+                "  · {name} → 第 {:?} 题（这题积累 {depth} 条，本人最多 {deepest} 条：{verdict}）",
+                seat.layer
+            );
         }
     }
     println!("调用审计：{} 条", count_calls(&conn)?);
